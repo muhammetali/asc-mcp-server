@@ -1,5 +1,6 @@
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { createHash } from 'crypto';
+import { resolve } from 'path';
 import { ascGet, ascPost, ascPatch, ascDelete, ascUploadChunk, type ASCResponse } from '../client.js';
 
 export async function listScreenshotSets(versionLocalizationId: string): Promise<string> {
@@ -61,8 +62,17 @@ export async function uploadScreenshot(
   filePath: string,
   fileName: string
 ): Promise<string> {
+  // Path traversal protection: resolve to absolute and verify existence
+  const resolvedPath = resolve(filePath);
+  if (!existsSync(resolvedPath)) {
+    throw new Error(`File not found: ${resolvedPath}`);
+  }
+  if (!resolvedPath.match(/\.(png|jpg|jpeg)$/i)) {
+    throw new Error(`Invalid file type. Only PNG and JPEG screenshots are supported: ${resolvedPath}`);
+  }
+
   // Read file
-  const fileData = readFileSync(filePath);
+  const fileData = readFileSync(resolvedPath);
   const fileSize = fileData.length;
   const checksum = createHash('md5').update(fileData).digest('hex');
 

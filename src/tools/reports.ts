@@ -1,5 +1,4 @@
 import { ascGetReport } from '../client.js';
-import { getToken } from '../auth.js';
 
 type ReportFrequency = 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY';
 type ReportSubType = 'SUMMARY' | 'DETAILED' | 'OPT_IN';

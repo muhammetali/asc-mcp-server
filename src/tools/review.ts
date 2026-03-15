@@ -43,14 +43,6 @@ export async function getReviewSubmission(versionId: string): Promise<string> {
   // Rejection info
   if (va.appStoreState === 'REJECTED') {
     md += `\n### Rejection Details\n\n`;
-    try {
-      const rejectionResult = await ascGet<ASCResponse>(`/v1/appStoreVersions/${versionId}/appStoreVersionPhasedRelease`);
-      md += `Check App Store Connect for detailed rejection reasons.\n`;
-    } catch {
-      // Fall through
-    }
-
-    // Try to get resolution center info
     md += `**To see rejection details:**\n`;
     md += `1. Go to App Store Connect > Your App > Version ${va.versionString}\n`;
     md += `2. Check the "Resolution Center" tab\n`;

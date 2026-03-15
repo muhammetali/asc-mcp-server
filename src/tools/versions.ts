@@ -1,6 +1,5 @@
 import { ascGet, ascPost, ascPatch, type ASCResponse } from '../client.js';
-
-const PROJECT_LOCALES = ['en-US', 'tr', 'de-DE', 'es-MX', 'fr-FR', 'ru', 'ar-SA'];
+import { PROJECT_LOCALES } from '../constants.js';
 
 export async function listVersions(appId: string, platform?: string): Promise<string> {
   const params: Record<string, string> = {

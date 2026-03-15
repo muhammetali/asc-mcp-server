@@ -1,4 +1,5 @@
 import { getToken } from './auth.js';
+import { DEFAULT_TIMEOUT_MS, UPLOAD_TIMEOUT_MS, REPORT_TIMEOUT_MS, MAX_PAGES } from './constants.js';
 
 const BASE_URL = 'https://api.appstoreconnect.apple.com';
 
@@ -26,6 +27,12 @@ export class ASCClientError extends Error {
     super(`ASC API Error (${status}):\n${msg}`);
     this.name = 'ASCClientError';
   }
+}
+
+function createAbortSignal(timeoutMs: number): AbortSignal {
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), timeoutMs);
+  return controller.signal;
 }
 
 async function handleResponse<T>(response: Response): Promise<T> {
@@ -87,7 +94,7 @@ async function decompress(data: Uint8Array): Promise<Buffer> {
   return gunzipSync(Buffer.from(data));
 }
 
-function headers(contentType = 'application/json'): Record<string, string> {
+function authHeaders(contentType = 'application/json'): Record<string, string> {
   return {
     Authorization: `Bearer ${getToken()}`,
     'Content-Type': contentType,
@@ -101,15 +108,19 @@ export async function ascGet<T = any>(path: string, params?: Record<string, stri
       url.searchParams.set(k, v);
     }
   }
-  const response = await fetch(url.toString(), { headers: headers() });
+  const response = await fetch(url.toString(), {
+    headers: authHeaders(),
+    signal: createAbortSignal(DEFAULT_TIMEOUT_MS),
+  });
   return handleResponse<T>(response);
 }
 
 export async function ascPost<T = any>(path: string, body: any): Promise<T> {
   const response = await fetch(`${BASE_URL}${path}`, {
     method: 'POST',
-    headers: headers(),
+    headers: authHeaders(),
     body: JSON.stringify(body),
+    signal: createAbortSignal(DEFAULT_TIMEOUT_MS),
   });
   return handleResponse<T>(response);
 }
@@ -117,8 +128,9 @@ export async function ascPost<T = any>(path: string, body: any): Promise<T> {
 export async function ascPatch<T = any>(path: string, body: any): Promise<T> {
   const response = await fetch(`${BASE_URL}${path}`, {
     method: 'PATCH',
-    headers: headers(),
+    headers: authHeaders(),
     body: JSON.stringify(body),
+    signal: createAbortSignal(DEFAULT_TIMEOUT_MS),
   });
   return handleResponse<T>(response);
 }
@@ -126,26 +138,31 @@ export async function ascPatch<T = any>(path: string, body: any): Promise<T> {
 export async function ascDelete(path: string): Promise<void> {
   const response = await fetch(`${BASE_URL}${path}`, {
     method: 'DELETE',
-    headers: headers(),
+    headers: authHeaders(),
+    signal: createAbortSignal(DEFAULT_TIMEOUT_MS),
   });
   await handleResponse<void>(response);
 }
 
-// For binary uploads (screenshots)
+// For binary uploads (screenshots) - longer timeout
 export async function ascUploadChunk(url: string, chunk: Buffer | Uint8Array, reqHeaders: Record<string, string>): Promise<void> {
   const response = await fetch(url, {
     method: 'PUT',
     headers: reqHeaders,
     body: Buffer.from(chunk),
+    signal: createAbortSignal(UPLOAD_TIMEOUT_MS),
   });
   if (!response.ok) {
     throw new Error(`Upload chunk failed: ${response.status} ${await response.text()}`);
   }
 }
 
-// For report downloads
+// For report downloads - longer timeout
 export async function ascGetReport(url: string): Promise<string> {
-  const response = await fetch(url, { headers: headers() });
+  const response = await fetch(url, {
+    headers: authHeaders(),
+    signal: createAbortSignal(REPORT_TIMEOUT_MS),
+  });
   if (!response.ok) {
     throw new Error(`Report download failed: ${response.status}`);
   }
@@ -158,7 +175,7 @@ export async function ascGetReport(url: string): Promise<string> {
   }
 }
 
-// Paginated fetch - get all pages
+// Paginated fetch with safety limit to prevent infinite loops
 export async function ascGetAll<T = any>(path: string, params?: Record<string, string>): Promise<T[]> {
   const allData: T[] = [];
   let url: string | null = `${BASE_URL}${path}`;
@@ -171,11 +188,16 @@ export async function ascGetAll<T = any>(path: string, params?: Record<string, s
   }
   url = urlObj.toString();
 
-  while (url) {
-    const resp: Response = await fetch(url, { headers: headers() });
+  let pageCount = 0;
+  while (url && pageCount < MAX_PAGES) {
+    const resp: Response = await fetch(url, {
+      headers: authHeaders(),
+      signal: createAbortSignal(DEFAULT_TIMEOUT_MS),
+    });
     const page: ASCResponse<T[]> = await handleResponse<ASCResponse<T[]>>(resp);
     allData.push(...page.data);
     url = page.links?.next || null;
+    pageCount++;
   }
 
   return allData;

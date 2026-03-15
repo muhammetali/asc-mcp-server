@@ -5,10 +5,14 @@ import { z } from 'zod';
 import { config } from 'dotenv';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { PROJECT_LOCALES } from './constants.js';
 
 // Load .env from the package directory
 const __dirname = dirname(fileURLToPath(import.meta.url));
 config({ path: resolve(__dirname, '..', '.env') });
+
+// Zod schema for locale validation (reused across tools)
+const localeSchema = z.enum(PROJECT_LOCALES).describe('Locale code (en-US, tr, de-DE, es-MX, fr-FR, ru, ar-SA)');
 
 // Tool implementations
 import { listApps, getAppInfo, updateAppInfoLocalization } from './tools/apps.js';
@@ -105,7 +109,7 @@ server.tool(
   'Update app-level localization (privacy policy URL, name, subtitle). Use this to fix missing privacy policies that cause App Store rejections.',
   {
     appId: z.string().describe('App ID'),
-    locale: z.string().describe('Locale code (e.g., en-US, tr, de-DE, es-MX, fr-FR, ru, ar-SA)'),
+    locale: localeSchema,
     privacyPolicyUrl: z.string().optional().describe('Privacy policy URL'),
     privacyChoicesUrl: z.string().optional().describe('Privacy choices URL (CCPA)'),
     privacyPolicyText: z.string().optional().describe('Privacy policy text'),
@@ -184,7 +188,7 @@ server.tool(
   'Update a single locale\'s version metadata (What\'s New, description, keywords, promotional text, URLs)',
   {
     versionId: z.string().describe('Version ID'),
-    locale: z.string().describe('Locale code'),
+    locale: localeSchema,
     whatsNew: z.string().optional().describe('What\'s New text'),
     description: z.string().optional().describe('App description'),
     keywords: z.string().optional().describe('Keywords (comma-separated, max 100 chars)'),
@@ -304,7 +308,7 @@ server.tool(
   'Set What\'s New text for a TestFlight build (shown to testers)',
   {
     buildId: z.string().describe('Build ID'),
-    locale: z.string().default('en-US').describe('Locale code'),
+    locale: localeSchema.default('en-US'),
     whatsNew: z.string().describe('What\'s New text for testers'),
   },
   async ({ buildId, locale, whatsNew }) => {
@@ -500,6 +504,15 @@ async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error('ASC MCP Server running on stdio');
+
+  // Graceful shutdown
+  const shutdown = async () => {
+    console.error('ASC MCP Server shutting down...');
+    await server.close();
+    process.exit(0);
+  };
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
 }
 
 main().catch((error) => {

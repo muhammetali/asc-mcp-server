@@ -1,7 +1,5 @@
 import { ascGet, ascPost, ascPatch, type ASCResponse } from '../client.js';
-
-// GoyGoyChat locales
-const PROJECT_LOCALES = ['en-US', 'tr', 'de-DE', 'es-MX', 'fr-FR', 'ru', 'ar-SA'];
+import { PROJECT_LOCALES } from '../constants.js';
 
 export async function listApps(): Promise<string> {
   const result = await ascGet<ASCResponse>('/v1/apps', {
