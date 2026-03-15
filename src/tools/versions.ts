@@ -3,9 +3,8 @@ import { PROJECT_LOCALES } from '../constants.js';
 
 export async function listVersions(appId: string, platform?: string): Promise<string> {
   const params: Record<string, string> = {
-    'fields[appStoreVersions]': 'versionString,appStoreState,platform,releaseType,createdDate,downloadable',
+    'fields[appStoreVersions]': 'versionString,appStoreState,platform,releaseType,createdDate',
     'limit': '20',
-    'sort': '-createdDate',
   };
 
   if (platform) {

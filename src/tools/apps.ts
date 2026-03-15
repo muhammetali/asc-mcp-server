@@ -28,7 +28,7 @@ export async function getAppInfo(appId: string): Promise<string> {
   // Fetch app info with included app info localizations
   const [appResult, infoResult] = await Promise.all([
     ascGet<ASCResponse>(`/v1/apps/${appId}`, {
-      'fields[apps]': 'name,bundleId,sku,primaryLocale,contentRightsDeclaration,isOrEverWasMadeForKids,availableInNewTerritories',
+      'fields[apps]': 'name,bundleId,sku,primaryLocale,contentRightsDeclaration,isOrEverWasMadeForKids',
       'include': 'appStoreVersions',
       'fields[appStoreVersions]': 'versionString,appStoreState,platform,releaseType,createdDate',
     }),
