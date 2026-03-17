@@ -27,7 +27,7 @@ import {
 } from './tools/builds.js';
 import {
   getReviewSubmission, updateReviewDetail,
-  submitForReview, getRejectionReasons,
+  submitForReview, withdrawFromReview, getRejectionReasons,
 } from './tools/review.js';
 import { getSalesReport, getFinancialReport } from './tools/reports.js';
 import {
@@ -370,6 +370,20 @@ server.tool(
   async ({ versionId }) => {
     try {
       const result = await submitForReview(versionId);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'asc_withdraw_from_review',
+  'Withdraw a version from App Review. Use when you need to cancel a pending review to make changes or create a new version.',
+  { versionId: z.string().describe('Version ID (from asc_list_versions)') },
+  async ({ versionId }) => {
+    try {
+      const result = await withdrawFromReview(versionId);
       return { content: [{ type: 'text', text: result }] };
     } catch (e) {
       return { content: [{ type: 'text', text: handleError(e) }], isError: true };

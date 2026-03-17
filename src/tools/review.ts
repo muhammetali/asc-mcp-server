@@ -1,4 +1,4 @@
-import { ascGet, ascPost, ascPatch, type ASCResponse } from '../client.js';
+import { ascGet, ascPost, ascPatch, ascDelete, type ASCResponse } from '../client.js';
 
 export async function getReviewSubmission(versionId: string): Promise<string> {
   // Get the version details first
@@ -164,6 +164,42 @@ export async function submitForReview(versionId: string): Promise<string> {
   md += `| **Locales** | ${locs.length} |\n`;
   md += `\n**Status:** Submitted for App Review. Typically takes 24-48 hours.\n`;
   md += `\nUse \`asc_list_versions\` to monitor review progress.`;
+
+  return md;
+}
+
+export async function withdrawFromReview(versionId: string): Promise<string> {
+  // Get version info to verify state
+  const versionResult = await ascGet<ASCResponse>(`/v1/appStoreVersions/${versionId}`, {
+    'fields[appStoreVersions]': 'versionString,appStoreState,platform',
+    'include': 'appStoreVersionSubmission',
+  });
+
+  const v = versionResult.data;
+  const va = v.attributes;
+
+  const validStates = ['WAITING_FOR_REVIEW', 'IN_REVIEW'];
+  if (!validStates.includes(va.appStoreState)) {
+    return `**Error:** Version v${va.versionString} is in state \`${va.appStoreState}\`. Can only withdraw from WAITING_FOR_REVIEW or IN_REVIEW.`;
+  }
+
+  // Find the submission
+  const submission = (versionResult.included || []).find((i: any) => i.type === 'appStoreVersionSubmissions');
+  if (!submission) {
+    return `**Error:** No submission found for version v${va.versionString}. It may have already been withdrawn.`;
+  }
+
+  // Delete the submission to withdraw from review
+  await ascDelete(`/v1/appStoreVersionSubmissions/${submission.id}`);
+
+  let md = `## Withdrawn from Review\n\n`;
+  md += `| Field | Value |\n`;
+  md += `|-------|-------|\n`;
+  md += `| **Version** | ${va.versionString} |\n`;
+  md += `| **Platform** | ${va.platform} |\n`;
+  md += `| **Previous State** | ${va.appStoreState} |\n`;
+  md += `| **New State** | PREPARE_FOR_SUBMISSION |\n`;
+  md += `\nThe version is now back in draft state. You can modify it or create a new version.`;
 
   return md;
 }

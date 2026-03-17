@@ -18,14 +18,14 @@ export async function listVersions(appId: string, platform?: string): Promise<st
   }
 
   let md = `## App Store Versions\n\n`;
-  md += `| Version | Platform | State | Release Type | Created |\n`;
-  md += `|---------|----------|-------|-------------|----------|\n`;
+  md += `| Version | Platform | State | Release Type | Created | Version ID |\n`;
+  md += `|---------|----------|-------|-------------|----------|------------|\n`;
 
   for (const v of result.data) {
     const a = v.attributes;
     const created = a.createdDate ? new Date(a.createdDate).toLocaleDateString() : '-';
     const stateEmoji = getStateIndicator(a.appStoreState);
-    md += `| ${a.versionString} | ${a.platform} | ${stateEmoji} ${a.appStoreState} | ${a.releaseType || 'MANUAL'} | ${created} |\n`;
+    md += `| ${a.versionString} | ${a.platform} | ${stateEmoji} ${a.appStoreState} | ${a.releaseType || 'MANUAL'} | ${created} | \`${v.id}\` |\n`;
   }
 
   // Summary

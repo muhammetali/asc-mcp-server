@@ -40,6 +40,11 @@ describe('tools/versions', () => {
       expect(result).toContain('2.1.0');
       expect(result).toContain('ATTENTION');
       expect(result).toContain('In Review');
+      // Version IDs must be included for downstream tool usage
+      expect(result).toContain('`v1`');
+      expect(result).toContain('`v2`');
+      expect(result).toContain('`v3`');
+      expect(result).toContain('Version ID');
     });
 
     it('should handle empty versions', async () => {
