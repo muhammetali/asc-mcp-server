@@ -1,7 +1,10 @@
 import { ascGet, ascPost, ascPatch, ascDelete, type ASCResponse } from '../client.js';
-import { PROJECT_LOCALES } from '../constants.js';
+import { PROJECT_LOCALES, APP_STORE_STATES, RESOURCE_TYPES } from '../constants.js';
+import { validateId, validateLocale, validateUrl } from '../validation.js';
 
 export async function listVersions(appId: string, platform?: string): Promise<string> {
+  validateId(appId, 'appId');
+
   const params: Record<string, string> = {
     'fields[appStoreVersions]': 'versionString,appStoreState,platform,releaseType,createdDate',
     'limit': '20',
@@ -30,8 +33,8 @@ export async function listVersions(appId: string, platform?: string): Promise<st
 
   // Summary
   const states = result.data.map((v: any) => v.attributes.appStoreState);
-  const rejected = states.filter((s: string) => s === 'REJECTED' || s === 'DEVELOPER_REJECTED');
-  const inReview = states.filter((s: string) => s === 'IN_REVIEW' || s === 'WAITING_FOR_REVIEW');
+  const rejected = states.filter((s: string) => s === APP_STORE_STATES.REJECTED || s === APP_STORE_STATES.DEVELOPER_REJECTED);
+  const inReview = states.filter((s: string) => s === APP_STORE_STATES.IN_REVIEW || s === APP_STORE_STATES.WAITING_FOR_REVIEW);
 
   if (rejected.length > 0) {
     md += `\n> **ATTENTION:** ${rejected.length} rejected version(s) found. Use \`asc_get_review_submission\` to see rejection details.\n`;
@@ -49,6 +52,8 @@ export async function createVersion(
   platform: string = 'IOS',
   releaseType: string = 'MANUAL'
 ): Promise<string> {
+  validateId(appId, 'appId');
+
   const body = {
     data: {
       type: 'appStoreVersions',
@@ -89,6 +94,8 @@ export async function updateWhatsNew(
   versionId: string,
   whatsNew: Record<string, string>
 ): Promise<string> {
+  validateId(versionId, 'versionId');
+
   // Get existing localizations for this version
   const result = await ascGet<ASCResponse>(`/v1/appStoreVersions/${versionId}/appStoreVersionLocalizations`, {
     'fields[appStoreVersionLocalizations]': 'locale,whatsNew,description,keywords,promotionalText',
@@ -154,6 +161,11 @@ export async function updateVersionLocalization(
     supportUrl?: string;
   }
 ): Promise<string> {
+  validateId(versionId, 'versionId');
+  validateLocale(locale);
+  if (updates.marketingUrl) validateUrl(updates.marketingUrl, 'marketingUrl');
+  if (updates.supportUrl) validateUrl(updates.supportUrl, 'supportUrl');
+
   // Get existing localizations for this version
   const result = await ascGet<ASCResponse>(`/v1/appStoreVersions/${versionId}/appStoreVersionLocalizations`, {
     'fields[appStoreVersionLocalizations]': 'locale,whatsNew,description,keywords,promotionalText,marketingUrl,supportUrl',
@@ -199,6 +211,8 @@ export async function updateVersionLocalization(
 }
 
 export async function getVersionLocalizations(versionId: string): Promise<string> {
+  validateId(versionId, 'versionId');
+
   const result = await ascGet<ASCResponse>(`/v1/appStoreVersions/${versionId}/appStoreVersionLocalizations`, {
     'fields[appStoreVersionLocalizations]': 'locale,whatsNew,description,keywords,promotionalText,marketingUrl,supportUrl',
   });
@@ -242,6 +256,9 @@ export async function getVersionLocalizations(versionId: string): Promise<string
 }
 
 export async function assignBuildToVersion(versionId: string, buildId: string): Promise<string> {
+  validateId(versionId, 'versionId');
+  validateId(buildId, 'buildId');
+
   await ascPatch(`/v1/appStoreVersions/${versionId}/relationships/build`, {
     data: {
       type: 'builds',
@@ -253,16 +270,18 @@ export async function assignBuildToVersion(versionId: string, buildId: string): 
 }
 
 export async function deleteVersion(versionId: string): Promise<string> {
+  validateId(versionId, 'versionId');
+
   // Verify the version state first
   const versionResult = await ascGet<ASCResponse>(`/v1/appStoreVersions/${versionId}`, {
     'fields[appStoreVersions]': 'versionString,appStoreState,platform',
   });
 
   const va = versionResult.data.attributes;
-  const deletableStates = ['PREPARE_FOR_SUBMISSION', 'DEVELOPER_REJECTED', 'REJECTED'];
+  const deletableStates = [APP_STORE_STATES.PREPARE_FOR_SUBMISSION, APP_STORE_STATES.DEVELOPER_REJECTED, APP_STORE_STATES.REJECTED];
 
   if (!deletableStates.includes(va.appStoreState)) {
-    return `**Error:** Version v${va.versionString} is in state \`${va.appStoreState}\`. Can only delete versions in PREPARE_FOR_SUBMISSION, DEVELOPER_REJECTED, or REJECTED state.`;
+    throw new Error(`Version v${va.versionString} is in state \`${va.appStoreState}\`. Can only delete versions in PREPARE_FOR_SUBMISSION, DEVELOPER_REJECTED, or REJECTED state.`);
   }
 
   await ascDelete(`/v1/appStoreVersions/${versionId}`);
@@ -280,16 +299,16 @@ export async function deleteVersion(versionId: string): Promise<string> {
 
 function getStateIndicator(state: string): string {
   switch (state) {
-    case 'READY_FOR_SALE': return '[LIVE]';
-    case 'PREPARE_FOR_SUBMISSION': return '[DRAFT]';
-    case 'WAITING_FOR_REVIEW': return '[WAITING]';
-    case 'IN_REVIEW': return '[REVIEW]';
-    case 'REJECTED': return '[REJECTED]';
-    case 'DEVELOPER_REJECTED': return '[DEV-REJECTED]';
-    case 'PENDING_DEVELOPER_RELEASE': return '[PENDING]';
-    case 'PROCESSING_FOR_APP_STORE': return '[PROCESSING]';
-    case 'DEVELOPER_REMOVED_FROM_SALE': return '[REMOVED]';
-    case 'REPLACED_WITH_NEW_VERSION': return '[REPLACED]';
+    case APP_STORE_STATES.READY_FOR_SALE: return '[LIVE]';
+    case APP_STORE_STATES.PREPARE_FOR_SUBMISSION: return '[DRAFT]';
+    case APP_STORE_STATES.WAITING_FOR_REVIEW: return '[WAITING]';
+    case APP_STORE_STATES.IN_REVIEW: return '[REVIEW]';
+    case APP_STORE_STATES.REJECTED: return '[REJECTED]';
+    case APP_STORE_STATES.DEVELOPER_REJECTED: return '[DEV-REJECTED]';
+    case APP_STORE_STATES.PENDING_DEVELOPER_RELEASE: return '[PENDING]';
+    case APP_STORE_STATES.PROCESSING_FOR_APP_STORE: return '[PROCESSING]';
+    case APP_STORE_STATES.DEVELOPER_REMOVED_FROM_SALE: return '[REMOVED]';
+    case APP_STORE_STATES.REPLACED_WITH_NEW_VERSION: return '[REPLACED]';
     default: return `[${state}]`;
   }
 }

@@ -1,6 +1,9 @@
 import { ascGet, ascPost, ascPatch, type ASCResponse } from '../client.js';
+import { validateId, validateLocale } from '../validation.js';
 
 export async function listBuilds(appId: string, limit: number = 10): Promise<string> {
+  validateId(appId, 'appId');
+
   const result = await ascGet<ASCResponse>(`/v1/builds`, {
     'filter[app]': appId,
     'fields[builds]': 'version,uploadedDate,expirationDate,expired,minOsVersion,processingState,buildAudienceType,usesNonExemptEncryption,iconAssetToken',
@@ -63,6 +66,8 @@ export async function listBuilds(appId: string, limit: number = 10): Promise<str
 }
 
 export async function getBuildDetails(buildId: string): Promise<string> {
+  validateId(buildId, 'buildId');
+
   const result = await ascGet<ASCResponse>(`/v1/builds/${buildId}`, {
     'fields[builds]': 'version,uploadedDate,expirationDate,expired,minOsVersion,processingState,buildAudienceType,usesNonExemptEncryption,computedMinMacOsVersion',
     'include': 'preReleaseVersion,buildBetaDetail,betaBuildLocalizations,icons,appEncryptionDeclaration',
@@ -101,6 +106,8 @@ export async function getBuildDetails(buildId: string): Promise<string> {
 }
 
 export async function listBetaGroups(appId: string): Promise<string> {
+  validateId(appId, 'appId');
+
   const result = await ascGet<ASCResponse>(`/v1/apps/${appId}/betaGroups`, {
     'fields[betaGroups]': 'name,isInternalGroup,publicLinkEnabled,publicLinkLimit,publicLinkLimitEnabled,createdDate,feedbackEnabled,hasAccessToAllBuilds',
   });
@@ -124,6 +131,9 @@ export async function listBetaGroups(appId: string): Promise<string> {
 }
 
 export async function addBuildToBetaGroup(betaGroupId: string, buildId: string): Promise<string> {
+  validateId(betaGroupId, 'betaGroupId');
+  validateId(buildId, 'buildId');
+
   await ascPost(`/v1/betaGroups/${betaGroupId}/relationships/builds`, {
     data: [{ type: 'builds', id: buildId }],
   });
@@ -136,6 +146,9 @@ export async function setBetaBuildLocalization(
   locale: string,
   whatsNew: string
 ): Promise<string> {
+  validateId(buildId, 'buildId');
+  validateLocale(locale);
+
   // Check existing localizations
   const result = await ascGet<ASCResponse>(`/v1/builds/${buildId}/betaBuildLocalizations`, {
     'fields[betaBuildLocalizations]': 'locale,whatsNew',
@@ -169,6 +182,8 @@ export async function setBetaBuildLocalization(
 }
 
 export async function setEncryption(buildId: string, usesNonExemptEncryption: boolean): Promise<string> {
+  validateId(buildId, 'buildId');
+
   await ascPatch(`/v1/builds/${buildId}`, {
     data: {
       type: 'builds',

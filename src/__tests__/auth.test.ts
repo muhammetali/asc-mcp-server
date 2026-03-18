@@ -1,12 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import jwt from 'jsonwebtoken';
 
-// Mock fs.readFileSync
+// Mock fs module
 vi.mock('fs', () => ({
   readFileSync: vi.fn(() => `-----BEGIN PRIVATE KEY-----
 MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgfake_key_for_testing
 hRANCAASfake_public_key_for_testing
 -----END PRIVATE KEY-----`),
+  existsSync: vi.fn(() => true),
+  accessSync: vi.fn(() => undefined),
+  constants: { R_OK: 4 },
 }));
 
 describe('auth', () => {
@@ -31,25 +34,25 @@ describe('auth', () => {
   it('should throw when credentials are missing', async () => {
     delete process.env.APP_STORE_CONNECT_KEY_ID;
     const { getToken } = await import('../auth.js');
-    expect(() => getToken()).toThrow('Missing credentials');
+    expect(() => getToken()).toThrow('Missing App Store Connect credentials');
   });
 
   it('should throw when KEY_ID is missing', async () => {
     process.env.APP_STORE_CONNECT_KEY_ID = '';
     const { getToken } = await import('../auth.js');
-    expect(() => getToken()).toThrow('Missing credentials');
+    expect(() => getToken()).toThrow('Missing App Store Connect credentials');
   });
 
   it('should throw when ISSUER_ID is missing', async () => {
     process.env.APP_STORE_CONNECT_ISSUER_ID = '';
     const { getToken } = await import('../auth.js');
-    expect(() => getToken()).toThrow('Missing credentials');
+    expect(() => getToken()).toThrow('Missing App Store Connect credentials');
   });
 
   it('should throw when P8_PATH is missing', async () => {
     process.env.APP_STORE_CONNECT_P8_PATH = '';
     const { getToken } = await import('../auth.js');
-    expect(() => getToken()).toThrow('Missing credentials');
+    expect(() => getToken()).toThrow('Missing App Store Connect credentials');
   });
 
   it('should generate JWT with correct structure', async () => {

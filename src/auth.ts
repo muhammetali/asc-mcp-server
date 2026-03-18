@@ -1,5 +1,5 @@
 import jwt from 'jsonwebtoken';
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync, accessSync, constants as fsConstants } from 'fs';
 
 interface TokenCache {
   token: string;
@@ -22,8 +22,18 @@ export function getToken(): string {
 
   if (!keyId || !issuerId || !p8Path) {
     throw new Error(
-      'Missing credentials. Set APP_STORE_CONNECT_KEY_ID, APP_STORE_CONNECT_ISSUER_ID, APP_STORE_CONNECT_P8_PATH in .env'
+      'Missing App Store Connect credentials. Ensure all required environment variables are set in .env file.'
     );
+  }
+
+  // Validate P8 file exists and is readable before attempting to read
+  if (!existsSync(p8Path)) {
+    throw new Error('App Store Connect private key file not found. Check the configured path.');
+  }
+  try {
+    accessSync(p8Path, fsConstants.R_OK);
+  } catch {
+    throw new Error('App Store Connect private key file is not readable. Check file permissions.');
   }
 
   const privateKey = readFileSync(p8Path, 'utf8');

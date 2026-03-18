@@ -2,8 +2,11 @@ import { readFileSync, existsSync } from 'fs';
 import { createHash } from 'crypto';
 import { resolve } from 'path';
 import { ascGet, ascPost, ascPatch, ascDelete, ascUploadChunk, type ASCResponse } from '../client.js';
+import { validateId } from '../validation.js';
 
 export async function listScreenshotSets(versionLocalizationId: string): Promise<string> {
+  validateId(versionLocalizationId, 'versionLocalizationId');
+
   const result = await ascGet<ASCResponse>(
     `/v1/appStoreVersionLocalizations/${versionLocalizationId}/appScreenshotSets`,
     {
@@ -62,6 +65,8 @@ export async function uploadScreenshot(
   filePath: string,
   fileName: string
 ): Promise<string> {
+  validateId(screenshotSetId, 'screenshotSetId');
+
   // Path traversal protection: resolve to absolute and verify existence
   const resolvedPath = resolve(filePath);
   if (!existsSync(resolvedPath)) {
@@ -137,11 +142,15 @@ export async function uploadScreenshot(
 }
 
 export async function deleteScreenshot(screenshotId: string): Promise<string> {
+  validateId(screenshotId, 'screenshotId');
+
   await ascDelete(`/v1/appScreenshots/${screenshotId}`);
   return `**Deleted** screenshot \`${screenshotId}\``;
 }
 
 export async function deleteAllScreenshotsInSet(screenshotSetId: string): Promise<string> {
+  validateId(screenshotSetId, 'screenshotSetId');
+
   const result = await ascGet<ASCResponse>(
     `/v1/appScreenshotSets/${screenshotSetId}/appScreenshots`,
     { 'fields[appScreenshots]': 'fileName' }

@@ -1,11 +1,15 @@
 import { ascGet, ascPost, ascPatch, ascDelete, type ASCResponse } from '../client.js';
+import { APP_STORE_STATES, RESOURCE_TYPES, VERSION_FIELDS, REVIEW_DETAIL_FIELDS } from '../constants.js';
+import { validateId } from '../validation.js';
 
 export async function getReviewSubmission(versionId: string): Promise<string> {
+  validateId(versionId, 'versionId');
+
   // Get the version details first
   const versionResult = await ascGet<ASCResponse>(`/v1/appStoreVersions/${versionId}`, {
-    'fields[appStoreVersions]': 'versionString,appStoreState,platform,createdDate',
-    'include': 'appStoreReviewDetail,appStoreVersionSubmission',
-    'fields[appStoreReviewDetails]': 'contactFirstName,contactLastName,contactEmail,contactPhone,demoAccountName,demoAccountPassword,demoAccountRequired,notes',
+    'fields[appStoreVersions]': VERSION_FIELDS.BASIC,
+    'include': 'appStoreReviewDetail',
+    'fields[appStoreReviewDetails]': REVIEW_DETAIL_FIELDS.FULL,
   });
 
   const v = versionResult.data;
@@ -19,7 +23,7 @@ export async function getReviewSubmission(versionId: string): Promise<string> {
   md += `| **State** | ${va.appStoreState} |\n`;
 
   // Review detail (demo account, notes, contact)
-  const reviewDetail = (versionResult.included || []).find((i: any) => i.type === 'appStoreReviewDetails');
+  const reviewDetail = (versionResult.included || []).find((i: any) => i.type === RESOURCE_TYPES.APP_STORE_REVIEW_DETAILS);
   if (reviewDetail) {
     const rd = reviewDetail.attributes;
     md += `\n### Review Detail\n\n`;
@@ -41,7 +45,7 @@ export async function getReviewSubmission(versionId: string): Promise<string> {
   }
 
   // Rejection info
-  if (va.appStoreState === 'REJECTED') {
+  if (va.appStoreState === APP_STORE_STATES.REJECTED) {
     md += `\n### Rejection Details\n\n`;
     md += `**To see rejection details:**\n`;
     md += `1. Go to App Store Connect > Your App > Version ${va.versionString}\n`;
@@ -65,13 +69,15 @@ export async function updateReviewDetail(
     notes?: string;
   }
 ): Promise<string> {
+  validateId(versionId, 'versionId');
+
   // Check if review detail exists
   const versionResult = await ascGet<ASCResponse>(`/v1/appStoreVersions/${versionId}`, {
     'include': 'appStoreReviewDetail',
-    'fields[appStoreReviewDetails]': 'contactFirstName,contactLastName,contactEmail,contactPhone,demoAccountName,demoAccountPassword,demoAccountRequired,notes',
+    'fields[appStoreReviewDetails]': REVIEW_DETAIL_FIELDS.FULL,
   });
 
-  const existingDetail = (versionResult.included || []).find((i: any) => i.type === 'appStoreReviewDetails');
+  const existingDetail = (versionResult.included || []).find((i: any) => i.type === RESOURCE_TYPES.APP_STORE_REVIEW_DETAILS);
 
   if (existingDetail) {
     await ascPatch(`/v1/appStoreReviewDetails/${existingDetail.id}`, {
@@ -110,6 +116,8 @@ export async function updateReviewDetail(
 }
 
 export async function submitForReview(versionId: string): Promise<string> {
+  validateId(versionId, 'versionId');
+
   // Pre-flight checks
   const versionResult = await ascGet<ASCResponse>(`/v1/appStoreVersions/${versionId}`, {
     'fields[appStoreVersions]': 'versionString,appStoreState,platform',
@@ -123,37 +131,38 @@ export async function submitForReview(versionId: string): Promise<string> {
   const va = v.attributes;
 
   // Check state
-  if (va.appStoreState !== 'PREPARE_FOR_SUBMISSION' && va.appStoreState !== 'REJECTED') {
-    return `**Error:** Version v${va.versionString} is in state \`${va.appStoreState}\`. Can only submit from PREPARE_FOR_SUBMISSION or REJECTED state.`;
+  if (va.appStoreState !== APP_STORE_STATES.PREPARE_FOR_SUBMISSION && va.appStoreState !== APP_STORE_STATES.REJECTED) {
+    throw new Error(`Version v${va.versionString} is in state \`${va.appStoreState}\`. Can only submit from PREPARE_FOR_SUBMISSION or REJECTED state.`);
   }
 
   // Check build attached
-  const build = (versionResult.included || []).find((i: any) => i.type === 'builds');
+  const build = (versionResult.included || []).find((i: any) => i.type === RESOURCE_TYPES.BUILDS);
   if (!build) {
-    return `**Error:** No build attached to version v${va.versionString}. Use \`asc_assign_build\` first.`;
+    throw new Error(`No build attached to version v${va.versionString}. Use \`asc_assign_build\` first.`);
   }
   if (build.attributes.processingState !== 'VALID') {
-    return `**Error:** Build ${build.attributes.version} is in state \`${build.attributes.processingState}\`. Must be VALID.`;
+    throw new Error(`Build ${build.attributes.version} is in state \`${build.attributes.processingState}\`. Must be VALID.`);
   }
 
   // Check encryption declaration
   if (build.attributes.usesNonExemptEncryption === null || build.attributes.usesNonExemptEncryption === undefined) {
-    return `**Error:** Build ${build.attributes.version} encryption declaration not set. Use \`asc_set_encryption\` first.`;
+    throw new Error(`Build ${build.attributes.version} encryption declaration not set. Use \`asc_set_encryption\` first.`);
   }
 
   // Check localizations
-  const locs = (versionResult.included || []).filter((i: any) => i.type === 'appStoreVersionLocalizations');
+  const locs = (versionResult.included || []).filter((i: any) => i.type === RESOURCE_TYPES.APP_STORE_VERSION_LOCALIZATIONS);
   const emptyWhatsNew = locs.filter((l: any) => !l.attributes.whatsNew);
   if (emptyWhatsNew.length > 0) {
-    return `**Error:** Empty What's New for locales: ${emptyWhatsNew.map((l: any) => l.attributes.locale).join(', ')}. Use \`asc_update_whats_new\` to set them.`;
+    throw new Error(`Empty What's New for locales: ${emptyWhatsNew.map((l: any) => l.attributes.locale).join(', ')}. Use \`asc_update_whats_new\` to set them.`);
   }
   const emptyDesc = locs.filter((l: any) => !l.attributes.description);
   if (emptyDesc.length > 0) {
-    return `**Error:** Empty description for locales: ${emptyDesc.map((l: any) => l.attributes.locale).join(', ')}. All locales need descriptions.`;
+    throw new Error(`Empty description for locales: ${emptyDesc.map((l: any) => l.attributes.locale).join(', ')}. All locales need descriptions.`);
   }
 
   // Get app ID from version relationship
   const appRelationship = v.relationships?.app?.data;
+  let resolvedAppId: string;
   if (!appRelationship) {
     // Fetch it separately
     const fullVersion = await ascGet<ASCResponse>(`/v1/appStoreVersions/${versionId}`, {
@@ -161,12 +170,13 @@ export async function submitForReview(versionId: string): Promise<string> {
       'include': 'app',
       'fields[apps]': 'bundleId',
     });
-    var appId = (fullVersion.included || []).find((i: any) => i.type === 'apps')?.id;
-    if (!appId) {
-      return `**Error:** Could not determine app ID for version. Please provide appId.`;
+    const foundAppId = (fullVersion.included || []).find((i: any) => i.type === RESOURCE_TYPES.APPS)?.id;
+    if (!foundAppId) {
+      throw new Error(`Could not determine app ID for version ${versionId}. Please provide appId.`);
     }
+    resolvedAppId = foundAppId;
   } else {
-    var appId = appRelationship.id;
+    resolvedAppId = appRelationship.id;
   }
 
   // Step 1: Create reviewSubmission
@@ -174,7 +184,7 @@ export async function submitForReview(versionId: string): Promise<string> {
     data: {
       type: 'reviewSubmissions',
       relationships: {
-        app: { data: { type: 'apps', id: appId } },
+        app: { data: { type: RESOURCE_TYPES.APPS, id: resolvedAppId } },
       },
     },
   });
@@ -215,6 +225,8 @@ export async function submitForReview(versionId: string): Promise<string> {
 }
 
 export async function withdrawFromReview(versionId: string): Promise<string> {
+  validateId(versionId, 'versionId');
+
   // Get version info
   const versionResult = await ascGet<ASCResponse>(`/v1/appStoreVersions/${versionId}`, {
     'fields[appStoreVersions]': 'versionString,appStoreState,platform',
@@ -223,9 +235,9 @@ export async function withdrawFromReview(versionId: string): Promise<string> {
   const v = versionResult.data;
   const va = v.attributes;
 
-  const validStates = ['WAITING_FOR_REVIEW', 'IN_REVIEW'];
+  const validStates = [APP_STORE_STATES.WAITING_FOR_REVIEW, APP_STORE_STATES.IN_REVIEW];
   if (!validStates.includes(va.appStoreState)) {
-    return `**Error:** Version v${va.versionString} is in state \`${va.appStoreState}\`. Can only withdraw from WAITING_FOR_REVIEW or IN_REVIEW.`;
+    throw new Error(`Version v${va.versionString} is in state \`${va.appStoreState}\`. Can only withdraw from WAITING_FOR_REVIEW or IN_REVIEW.`);
   }
 
   // Find the active reviewSubmission for this app
@@ -239,9 +251,9 @@ export async function withdrawFromReview(versionId: string): Promise<string> {
       'include': 'app',
       'fields[apps]': 'bundleId',
     });
-    const app = (fullVersion.included || []).find((i: any) => i.type === 'apps');
+    const app = (fullVersion.included || []).find((i: any) => i.type === RESOURCE_TYPES.APPS);
     if (!app) {
-      return `**Error:** Could not determine app ID for version.`;
+      throw new Error(`Could not determine app ID for version ${versionId}.`);
     }
     appId = app.id;
   }
@@ -258,7 +270,7 @@ export async function withdrawFromReview(versionId: string): Promise<string> {
   ) || submissions.data;
 
   if (!activeSubmission || (Array.isArray(activeSubmission) && activeSubmission.length === 0)) {
-    return `**Error:** No active review submission found for this app.`;
+    throw new Error('No active review submission found for this app.');
   }
 
   const submissionToCancel = Array.isArray(activeSubmission) ? activeSubmission[0] : activeSubmission;
@@ -285,9 +297,11 @@ export async function withdrawFromReview(versionId: string): Promise<string> {
 }
 
 export async function getRejectionReasons(appId: string): Promise<string> {
+  validateId(appId, 'appId');
+
   // Get the most recent rejected version
   const result = await ascGet<ASCResponse>(`/v1/apps/${appId}/appStoreVersions`, {
-    'filter[appStoreState]': 'REJECTED',
+    'filter[appStoreState]': APP_STORE_STATES.REJECTED,
     'fields[appStoreVersions]': 'versionString,appStoreState,platform,createdDate',
     'sort': '-createdDate',
     'limit': '5',
@@ -310,7 +324,7 @@ export async function getRejectionReasons(appId: string): Promise<string> {
         'include': 'appStoreReviewDetail',
         'fields[appStoreReviewDetails]': 'notes',
       });
-      const detail = (subResult.included || []).find((i: any) => i.type === 'appStoreReviewDetails');
+      const detail = (subResult.included || []).find((i: any) => i.type === RESOURCE_TYPES.APP_STORE_REVIEW_DETAILS);
       if (detail?.attributes?.notes) {
         md += `**Reviewer Notes:** ${detail.attributes.notes}\n\n`;
       }

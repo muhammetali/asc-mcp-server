@@ -27,11 +27,7 @@ describe('tools/review', () => {
       );
 
       const { submitForReview } = await import('../tools/review.js');
-      const result = await submitForReview('v1');
-
-      expect(result).toContain('Error');
-      expect(result).toContain('READY_FOR_SALE');
-      expect(result).toContain('PREPARE_FOR_SUBMISSION');
+      await expect(submitForReview('v1')).rejects.toThrow('READY_FOR_SALE');
     });
 
     it('should reject if no build is attached', async () => {
@@ -43,11 +39,7 @@ describe('tools/review', () => {
       );
 
       const { submitForReview } = await import('../tools/review.js');
-      const result = await submitForReview('v1');
-
-      expect(result).toContain('Error');
-      expect(result).toContain('No build attached');
-      expect(result).toContain('asc_assign_build');
+      await expect(submitForReview('v1')).rejects.toThrow('No build attached');
     });
 
     it('should reject if build is not VALID', async () => {
@@ -61,11 +53,7 @@ describe('tools/review', () => {
       );
 
       const { submitForReview } = await import('../tools/review.js');
-      const result = await submitForReview('v1');
-
-      expect(result).toContain('Error');
-      expect(result).toContain('PROCESSING');
-      expect(result).toContain('VALID');
+      await expect(submitForReview('v1')).rejects.toThrow('PROCESSING');
     });
 
     it('should reject if encryption declaration is not set', async () => {
@@ -80,11 +68,7 @@ describe('tools/review', () => {
       );
 
       const { submitForReview } = await import('../tools/review.js');
-      const result = await submitForReview('v1');
-
-      expect(result).toContain('Error');
-      expect(result).toContain('encryption');
-      expect(result).toContain('asc_set_encryption');
+      await expect(submitForReview('v1')).rejects.toThrow('encryption');
     });
 
     it('should reject if What\'s New is empty for any locale', async () => {
@@ -100,11 +84,7 @@ describe('tools/review', () => {
       );
 
       const { submitForReview } = await import('../tools/review.js');
-      const result = await submitForReview('v1');
-
-      expect(result).toContain('Error');
-      expect(result).toContain("Empty What's New");
-      expect(result).toContain('tr');
+      await expect(submitForReview('v1')).rejects.toThrow("Empty What's New");
     });
 
     it('should reject if descriptions are empty', async () => {
@@ -120,11 +100,7 @@ describe('tools/review', () => {
       );
 
       const { submitForReview } = await import('../tools/review.js');
-      const result = await submitForReview('v1');
-
-      expect(result).toContain('Error');
-      expect(result).toContain('Empty description');
-      expect(result).toContain('tr');
+      await expect(submitForReview('v1')).rejects.toThrow('Empty description');
     });
 
     it('should submit successfully using new reviewSubmissions API', async () => {

@@ -11,9 +11,16 @@ export interface ASCError {
   detail: string;
 }
 
+export interface ASCIncludedResource {
+  type: string;
+  id: string;
+  attributes: Record<string, any>;
+  relationships?: Record<string, { data: { type: string; id: string } | Array<{ type: string; id: string }> }>;
+}
+
 export interface ASCResponse<T = any> {
   data: T;
-  included?: any[];
+  included?: ASCIncludedResource[];
   links?: { self: string; next?: string };
   meta?: { paging?: { total: number; limit: number } };
 }

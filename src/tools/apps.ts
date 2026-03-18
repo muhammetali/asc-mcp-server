@@ -1,5 +1,6 @@
 import { ascGet, ascPost, ascPatch, type ASCResponse } from '../client.js';
-import { PROJECT_LOCALES } from '../constants.js';
+import { PROJECT_LOCALES, RESOURCE_TYPES } from '../constants.js';
+import { validateId, validateLocale, validateUrl } from '../validation.js';
 
 export async function listApps(): Promise<string> {
   const result = await ascGet<ASCResponse>('/v1/apps', {
@@ -25,6 +26,8 @@ export async function listApps(): Promise<string> {
 }
 
 export async function getAppInfo(appId: string): Promise<string> {
+  validateId(appId, 'appId');
+
   // Fetch app info with included app info localizations
   const [appResult, infoResult] = await Promise.all([
     ascGet<ASCResponse>(`/v1/apps/${appId}`, {
@@ -65,7 +68,7 @@ export async function getAppInfo(appId: string): Promise<string> {
   }
 
   // Localizations (privacy policy etc.)
-  const localizations = infoResult.included?.filter((i: any) => i.type === 'appInfoLocalizations') || [];
+  const localizations = infoResult.included?.filter((i: any) => i.type === RESOURCE_TYPES.APP_INFO_LOCALIZATIONS) || [];
   if (localizations.length > 0) {
     md += `\n### Localizations (Privacy Policy & Metadata)\n\n`;
     md += `| Locale | Name | Subtitle | Privacy Policy URL | Privacy Choices URL |\n`;
@@ -91,7 +94,7 @@ export async function getAppInfo(appId: string): Promise<string> {
   }
 
   // Recent versions
-  const versions = appResult.included?.filter((i: any) => i.type === 'appStoreVersions') || [];
+  const versions = appResult.included?.filter((i: any) => i.type === RESOURCE_TYPES.APP_STORE_VERSIONS) || [];
   if (versions.length > 0) {
     md += `\n### Recent Versions\n\n`;
     md += `| Version | Platform | State | Created |\n`;
@@ -117,6 +120,11 @@ export async function updateAppInfoLocalization(
     subtitle?: string;
   }
 ): Promise<string> {
+  validateId(appId, 'appId');
+  validateLocale(locale);
+  if (updates.privacyPolicyUrl) validateUrl(updates.privacyPolicyUrl, 'privacyPolicyUrl');
+  if (updates.privacyChoicesUrl) validateUrl(updates.privacyChoicesUrl, 'privacyChoicesUrl');
+
   // First find the app info and its localizations
   const infoResult = await ascGet<ASCResponse>(`/v1/apps/${appId}/appInfos`, {
     'include': 'appInfoLocalizations',
@@ -124,11 +132,11 @@ export async function updateAppInfoLocalization(
   });
 
   if (!infoResult.data || infoResult.data.length === 0) {
-    return '**Error:** No app info found for this app.';
+    throw new Error('No app info found for this app.');
   }
 
   const appInfoId = infoResult.data[0].id;
-  const localizations = infoResult.included?.filter((i: any) => i.type === 'appInfoLocalizations') || [];
+  const localizations = infoResult.included?.filter((i: any) => i.type === RESOURCE_TYPES.APP_INFO_LOCALIZATIONS) || [];
   const targetLoc = localizations.find((l: any) => l.attributes.locale === locale);
 
   if (!targetLoc) {
