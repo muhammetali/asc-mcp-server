@@ -115,7 +115,16 @@ export async function updateReviewDetail(
   return md;
 }
 
-export async function submitForReview(versionId: string): Promise<string> {
+export async function submitForReview(versionId?: string, appId?: string, versionString?: string, platform?: string): Promise<string> {
+  // If versionString provided instead of versionId, resolve it
+  if (versionString && appId) {
+    const { resolveVersionId } = await import('./versions.js');
+    const resolved = await resolveVersionId(appId, versionString, platform || 'IOS');
+    versionId = resolved.id;
+  }
+  if (!versionId) {
+    throw new Error('Provide either versionId OR both appId and versionString.');
+  }
   validateId(versionId, 'versionId');
 
   // Pre-flight checks
@@ -265,15 +274,14 @@ export async function withdrawFromReview(versionId: string): Promise<string> {
     'fields[reviewSubmissions]': 'state,submittedDate',
   });
 
-  const activeSubmission = submissions.data?.find?.((s: any) =>
+  const submissionsArray = Array.isArray(submissions.data) ? submissions.data : (submissions.data ? [submissions.data] : []);
+  const submissionToCancel = submissionsArray.find((s: any) =>
     s.attributes.state === 'WAITING_FOR_REVIEW' || s.attributes.state === 'IN_REVIEW'
-  ) || submissions.data;
+  );
 
-  if (!activeSubmission || (Array.isArray(activeSubmission) && activeSubmission.length === 0)) {
-    throw new Error('No active review submission found for this app.');
+  if (!submissionToCancel) {
+    throw new Error('No active review submission found for this app. The version may have already been withdrawn or not yet submitted.');
   }
-
-  const submissionToCancel = Array.isArray(activeSubmission) ? activeSubmission[0] : activeSubmission;
 
   // Cancel by setting submitted = false (PATCH)
   await ascPatch(`/v1/reviewSubmissions/${submissionToCancel.id}`, {
@@ -303,7 +311,6 @@ export async function getRejectionReasons(appId: string): Promise<string> {
   const result = await ascGet<ASCResponse>(`/v1/apps/${appId}/appStoreVersions`, {
     'filter[appStoreState]': APP_STORE_STATES.REJECTED,
     'fields[appStoreVersions]': 'versionString,appStoreState,platform,createdDate',
-    'sort': '-createdDate',
     'limit': '5',
   });
 

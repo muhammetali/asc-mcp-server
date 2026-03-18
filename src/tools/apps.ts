@@ -97,12 +97,12 @@ export async function getAppInfo(appId: string): Promise<string> {
   const versions = appResult.included?.filter((i: any) => i.type === RESOURCE_TYPES.APP_STORE_VERSIONS) || [];
   if (versions.length > 0) {
     md += `\n### Recent Versions\n\n`;
-    md += `| Version | Platform | State | Created |\n`;
-    md += `|---------|----------|-------|---------|\n`;
+    md += `| Version | Platform | State | Created | Version ID |\n`;
+    md += `|---------|----------|-------|---------|------------|\n`;
     for (const v of versions.slice(0, 10)) {
       const va = v.attributes;
       const created = va.createdDate ? new Date(va.createdDate).toLocaleDateString() : '-';
-      md += `| ${va.versionString} | ${va.platform} | ${va.appStoreState} | ${created} |\n`;
+      md += `| ${va.versionString} | ${va.platform} | ${va.appStoreState} | ${created} | \`${v.id}\` |\n`;
     }
   }
 

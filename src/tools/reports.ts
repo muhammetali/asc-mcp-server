@@ -1,4 +1,5 @@
 import { ascGetReport } from '../client.js';
+import { validateId } from '../validation.js';
 
 type ReportFrequency = 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY';
 type ReportSubType = 'SUMMARY' | 'DETAILED' | 'OPT_IN';
@@ -9,6 +10,11 @@ export async function getSalesReport(
   reportDate: string,
   reportSubType: ReportSubType = 'SUMMARY'
 ): Promise<string> {
+  validateId(vendorNumber, 'vendorNumber');
+  if (!/^\d{4}-\d{2}(-\d{2})?$/.test(reportDate)) {
+    throw new Error(`Invalid reportDate: "${reportDate}". Use YYYY-MM-DD for daily or YYYY-MM for monthly/yearly.`);
+  }
+
   const params = new URLSearchParams({
     'filter[frequency]': frequency,
     'filter[reportDate]': reportDate,
@@ -102,6 +108,9 @@ export async function getFinancialReport(
   regionCode: string,
   reportDate: string
 ): Promise<string> {
+  validateId(vendorNumber, 'vendorNumber');
+  validateId(regionCode, 'regionCode');
+
   const params = new URLSearchParams({
     'filter[regionCode]': regionCode,
     'filter[reportDate]': reportDate,

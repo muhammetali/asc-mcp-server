@@ -161,9 +161,10 @@ export async function deleteAllScreenshotsInSet(screenshotSetId: string): Promis
     return `No screenshots to delete in set \`${screenshotSetId}\`.`;
   }
 
+  await Promise.all(screenshots.map((ss: any) => ascDelete(`/v1/appScreenshots/${ss.id}`)));
+
   let md = `## Deleting Screenshots\n\n`;
   for (const ss of screenshots) {
-    await ascDelete(`/v1/appScreenshots/${ss.id}`);
     md += `- Deleted: ${ss.attributes.fileName}\n`;
   }
 

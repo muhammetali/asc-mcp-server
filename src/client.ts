@@ -37,9 +37,7 @@ export class ASCClientError extends Error {
 }
 
 function createAbortSignal(timeoutMs: number): AbortSignal {
-  const controller = new AbortController();
-  setTimeout(() => controller.abort(), timeoutMs);
-  return controller.signal;
+  return AbortSignal.timeout(timeoutMs);
 }
 
 async function handleResponse<T>(response: Response): Promise<T> {
@@ -142,12 +140,16 @@ export async function ascPatch<T = any>(path: string, body: any): Promise<T> {
   return handleResponse<T>(response);
 }
 
-export async function ascDelete(path: string): Promise<void> {
-  const response = await fetch(`${BASE_URL}${path}`, {
+export async function ascDelete(path: string, body?: any): Promise<void> {
+  const options: RequestInit = {
     method: 'DELETE',
     headers: authHeaders(),
     signal: createAbortSignal(DEFAULT_TIMEOUT_MS),
-  });
+  };
+  if (body) {
+    options.body = JSON.stringify(body);
+  }
+  const response = await fetch(`${BASE_URL}${path}`, options);
   await handleResponse<void>(response);
 }
 

@@ -104,16 +104,11 @@ export async function updateWhatsNew(
   const existing: any[] = result.data || [];
   const existingMap = new Map<string, any>(existing.map((l: any) => [l.attributes.locale, l]));
 
-  let md = `## What's New Updated\n\n`;
-  md += `| Locale | Status | Text (preview) |\n`;
-  md += `|--------|--------|----------------|\n`;
-
-  for (const [locale, text] of Object.entries(whatsNew)) {
+  // Update/create all locales in parallel
+  const updates = Object.entries(whatsNew).map(async ([locale, text]) => {
     const existingLoc = existingMap.get(locale);
-    const preview = text.length > 60 ? text.slice(0, 60) + '...' : text;
 
     if (existingLoc) {
-      // Update existing
       await ascPatch(`/v1/appStoreVersionLocalizations/${existingLoc.id}`, {
         data: {
           type: 'appStoreVersionLocalizations',
@@ -121,9 +116,8 @@ export async function updateWhatsNew(
           attributes: { whatsNew: text },
         },
       });
-      md += `| ${locale} | Updated | ${preview} |\n`;
+      return { locale, text, status: 'Updated' };
     } else {
-      // Create new localization
       await ascPost('/v1/appStoreVersionLocalizations', {
         data: {
           type: 'appStoreVersionLocalizations',
@@ -135,8 +129,19 @@ export async function updateWhatsNew(
           },
         },
       });
-      md += `| ${locale} | Created | ${preview} |\n`;
+      return { locale, text, status: 'Created' };
     }
+  });
+
+  const results = await Promise.all(updates);
+
+  let md = `## What's New Updated\n\n`;
+  md += `| Locale | Status | Text (preview) |\n`;
+  md += `|--------|--------|----------------|\n`;
+
+  for (const r of results) {
+    const preview = r.text.length > 60 ? r.text.slice(0, 60) + '...' : r.text;
+    md += `| ${r.locale} | ${r.status} | ${preview} |\n`;
   }
 
   // Check for missing locales
@@ -228,6 +233,7 @@ export async function getVersionLocalizations(versionId: string): Promise<string
   for (const loc of locs) {
     const a = loc.attributes;
     md += `### ${a.locale}\n\n`;
+    md += `**Localization ID:** \`${loc.id}\`\n\n`;
     md += `| Field | Value |\n`;
     md += `|-------|-------|\n`;
     md += `| **What's New** | ${a.whatsNew ? (a.whatsNew.length > 100 ? a.whatsNew.slice(0, 100) + '...' : a.whatsNew) : '**EMPTY**'} |\n`;
@@ -293,6 +299,181 @@ export async function deleteVersion(versionId: string): Promise<string> {
   md += `| **Platform** | ${va.platform} |\n`;
   md += `| **Previous State** | ${va.appStoreState} |\n`;
   md += `\n**Status:** Version deleted successfully.`;
+
+  return md;
+}
+
+export async function resolveVersionId(appId: string, versionString: string, platform: string = 'IOS'): Promise<{ id: string; attributes: any }> {
+  validateId(appId, 'appId');
+
+  const result = await ascGet<ASCResponse>(`/v1/apps/${appId}/appStoreVersions`, {
+    'filter[versionString]': versionString,
+    'filter[platform]': platform,
+    'fields[appStoreVersions]': 'versionString,appStoreState,platform,releaseType,createdDate',
+    'limit': '5',
+  });
+
+  if (!result.data || result.data.length === 0) {
+    throw new Error(`Version "${versionString}" not found for app \`${appId}\` (platform: ${platform}).`);
+  }
+
+  return result.data[0];
+}
+
+export async function updateVersionString(versionId: string, newVersionString: string): Promise<string> {
+  validateId(versionId, 'versionId');
+
+  // Verify current state
+  const versionResult = await ascGet<ASCResponse>(`/v1/appStoreVersions/${versionId}`, {
+    'fields[appStoreVersions]': 'versionString,appStoreState,platform',
+  });
+
+  const va = versionResult.data.attributes;
+  const editableStates = [APP_STORE_STATES.PREPARE_FOR_SUBMISSION, APP_STORE_STATES.DEVELOPER_REJECTED, APP_STORE_STATES.REJECTED];
+
+  if (!editableStates.includes(va.appStoreState)) {
+    throw new Error(`Version v${va.versionString} is in state \`${va.appStoreState}\`. Can only change version string in PREPARE_FOR_SUBMISSION, DEVELOPER_REJECTED, or REJECTED state.`);
+  }
+
+  await ascPatch(`/v1/appStoreVersions/${versionId}`, {
+    data: {
+      type: 'appStoreVersions',
+      id: versionId,
+      attributes: { versionString: newVersionString },
+    },
+  });
+
+  let md = `## Version String Updated\n\n`;
+  md += `| Field | Value |\n`;
+  md += `|-------|-------|\n`;
+  md += `| **Previous** | ${va.versionString} |\n`;
+  md += `| **New** | ${newVersionString} |\n`;
+  md += `| **Platform** | ${va.platform} |\n`;
+  md += `| **State** | ${va.appStoreState} |\n`;
+  md += `| **Version ID** | ${versionId} |\n`;
+
+  return md;
+}
+
+export async function managePhasedRelease(
+  versionId: string,
+  action: 'create' | 'pause' | 'resume' | 'complete'
+): Promise<string> {
+  validateId(versionId, 'versionId');
+
+  if (action === 'create') {
+    const result = await ascPost<ASCResponse>('/v1/appStoreVersionPhasedReleases', {
+      data: {
+        type: 'appStoreVersionPhasedReleases',
+        attributes: {
+          phasedReleaseState: 'ACTIVE',
+        },
+        relationships: {
+          appStoreVersion: {
+            data: { type: 'appStoreVersions', id: versionId },
+          },
+        },
+      },
+    });
+
+    return `## Phased Release Created\n\n**Version:** \`${versionId}\`\n**State:** ACTIVE\n**ID:** \`${result.data.id}\`\n\nThe release will roll out gradually over 7 days.`;
+  }
+
+  // For pause/resume/complete, find existing phased release
+  const versionResult = await ascGet<ASCResponse>(`/v1/appStoreVersions/${versionId}`, {
+    'include': 'appStoreVersionPhasedRelease',
+    'fields[appStoreVersionPhasedReleases]': 'phasedReleaseState,startDate,currentDayNumber,totalPauseDuration',
+  });
+
+  const phasedRelease = (versionResult.included || []).find((i: any) => i.type === 'appStoreVersionPhasedReleases');
+  if (!phasedRelease) {
+    throw new Error('No phased release found for this version. Use action "create" first.');
+  }
+
+  const stateMap: Record<string, string> = {
+    pause: 'PAUSED',
+    resume: 'ACTIVE',
+    complete: 'COMPLETE',
+  };
+
+  await ascPatch(`/v1/appStoreVersionPhasedReleases/${phasedRelease.id}`, {
+    data: {
+      type: 'appStoreVersionPhasedReleases',
+      id: phasedRelease.id,
+      attributes: {
+        phasedReleaseState: stateMap[action],
+      },
+    },
+  });
+
+  const pa = phasedRelease.attributes;
+  let md = `## Phased Release Updated\n\n`;
+  md += `| Field | Value |\n`;
+  md += `|-------|-------|\n`;
+  md += `| **Action** | ${action.toUpperCase()} |\n`;
+  md += `| **New State** | ${stateMap[action]} |\n`;
+  md += `| **Day** | ${pa.currentDayNumber || '-'} / 7 |\n`;
+  md += `| **Started** | ${pa.startDate ? new Date(pa.startDate).toLocaleDateString() : '-'} |\n`;
+
+  if (action === 'complete') {
+    md += `\nThe version is now available to all users.`;
+  } else if (action === 'pause') {
+    md += `\nThe rollout is paused. Use "resume" to continue or "complete" to release to everyone.`;
+  }
+
+  return md;
+}
+
+export async function releaseVersion(versionId: string): Promise<string> {
+  validateId(versionId, 'versionId');
+
+  const versionResult = await ascGet<ASCResponse>(`/v1/appStoreVersions/${versionId}`, {
+    'fields[appStoreVersions]': 'versionString,appStoreState,platform',
+    'include': 'appStoreVersionPhasedRelease',
+    'fields[appStoreVersionPhasedReleases]': 'phasedReleaseState,currentDayNumber',
+  });
+
+  const va = versionResult.data.attributes;
+
+  if (va.appStoreState !== APP_STORE_STATES.PENDING_DEVELOPER_RELEASE) {
+    throw new Error(`Version v${va.versionString} is in state \`${va.appStoreState}\`. Can only release from PENDING_DEVELOPER_RELEASE state.`);
+  }
+
+  // Check if there's a phased release — if so, complete it
+  const phasedRelease = (versionResult.included || []).find((i: any) => i.type === 'appStoreVersionPhasedReleases');
+
+  if (phasedRelease) {
+    // Complete the phased release to release to all users
+    await ascPatch(`/v1/appStoreVersionPhasedReleases/${phasedRelease.id}`, {
+      data: {
+        type: 'appStoreVersionPhasedReleases',
+        id: phasedRelease.id,
+        attributes: { phasedReleaseState: 'COMPLETE' },
+      },
+    });
+  } else {
+    // No phased release — create one with COMPLETE state to trigger immediate release
+    await ascPost('/v1/appStoreVersionPhasedReleases', {
+      data: {
+        type: 'appStoreVersionPhasedReleases',
+        attributes: { phasedReleaseState: 'COMPLETE' },
+        relationships: {
+          appStoreVersion: {
+            data: { type: 'appStoreVersions', id: versionId },
+          },
+        },
+      },
+    });
+  }
+
+  let md = `## Version Released\n\n`;
+  md += `| Field | Value |\n`;
+  md += `|-------|-------|\n`;
+  md += `| **Version** | ${va.versionString} |\n`;
+  md += `| **Platform** | ${va.platform} |\n`;
+  md += `| **Previous State** | PENDING_DEVELOPER_RELEASE |\n`;
+  md += `| **New State** | READY_FOR_SALE |\n`;
+  md += `\nThe version is now live on the App Store!`;
 
   return md;
 }

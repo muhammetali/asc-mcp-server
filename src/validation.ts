@@ -36,3 +36,10 @@ export function validateLocale(locale: string): void {
     );
   }
 }
+
+/**
+ * Escapes pipe characters and newlines in strings for safe markdown table cell content.
+ */
+export function escapeMarkdown(value: string): string {
+  return value.replace(/\|/g, '\\|').replace(/\n/g, ' ');
+}

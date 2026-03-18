@@ -19,7 +19,8 @@ import { listApps, getAppInfo, updateAppInfoLocalization } from './tools/apps.js
 import {
   listVersions, createVersion, updateWhatsNew,
   updateVersionLocalization, getVersionLocalizations,
-  assignBuildToVersion, deleteVersion,
+  assignBuildToVersion, deleteVersion, updateVersionString,
+  resolveVersionId, managePhasedRelease, releaseVersion,
 } from './tools/versions.js';
 import {
   listBuilds, getBuildDetails, listBetaGroups,
@@ -35,6 +36,33 @@ import {
   listScreenshotSets, uploadScreenshot,
   deleteScreenshot, deleteAllScreenshotsInSet,
 } from './tools/screenshots.js';
+import {
+  listCustomerReviews, respondToCustomerReview,
+} from './tools/customers.js';
+import {
+  listBetaTesters, addBetaTester, removeBetaTester,
+  createBetaGroup, deleteBetaGroup,
+} from './tools/betaTesters.js';
+import {
+  listInAppPurchases, listSubscriptionGroups, getAppPricing,
+} from './tools/appAvailability.js';
+import {
+  getBuildDiagnostics, getPerfPowerMetrics,
+  requestAnalyticsReport, getAnalyticsReport,
+} from './tools/diagnostics.js';
+import {
+  getAgeRating, updateAgeRating, manageAppAvailability,
+  uploadReviewAttachment, listCertificates, registerDevice, listDevices,
+} from './tools/appManagement.js';
+import {
+  submitForBetaReview, getBetaReviewStatus,
+} from './tools/betaReview.js';
+import {
+  listSandboxTesters, clearSandboxTesterHistory,
+  listAppEvents, createAppEvent, listCustomProductPages,
+  createScreenshotSet, reorderScreenshots,
+  uploadAppPreview, deleteAppPreview, createPreviewSet, listPreviewSets,
+} from './tools/appFeatures.js';
 
 import { ASCClientError } from './client.js';
 
@@ -68,8 +96,20 @@ function getErrorHelp(error: ASCClientError): string {
       return '> Rate limited by Apple. Wait 30 seconds and try again.';
     case 'ENTITY_UNPROCESSABLE':
       return '> Invalid data. Check that all required fields are filled correctly.';
+    case 'UNAUTHORIZED':
+      return '> Authentication failed. Check your API key, issuer ID, and that the P8 file is valid.';
+    case 'PARAMETER_ERROR':
+      return '> Invalid parameter. Check parameter names and values.';
+    case 'ENTITY_ERROR':
+      return '> Entity validation failed. One or more required fields may be missing or invalid.';
+    case 'STATE_ERROR':
+      return '> The resource is not in the correct state for this operation.';
+    case 'NOT_ALLOWED':
+      return '> This operation is not allowed. Your account may not have the required permissions or role.';
     default:
-      return '';
+      return error.status === 401
+        ? '> Authentication failed. Your JWT token may be expired. Restart the server to regenerate.'
+        : '';
   }
 }
 
@@ -238,6 +278,79 @@ server.tool(
   }
 );
 
+server.tool(
+  'asc_update_version_string',
+  'Change the version string of a draft/rejected version (e.g., 1.5.0 → 1.6.0). Only works for editable versions.',
+  {
+    versionId: z.string().describe('Version ID (from asc_list_versions)'),
+    newVersionString: z.string().describe('New version string (e.g., 2.0.0)'),
+  },
+  async ({ versionId, newVersionString }) => {
+    try {
+      const result = await updateVersionString(versionId, newVersionString);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'asc_resolve_version',
+  'Find a version ID by version string (e.g., "1.6.0"). Useful when you have the version number but need the ID for other tools.',
+  {
+    appId: z.string().describe('App ID'),
+    versionString: z.string().describe('Version string to find (e.g., 1.6.0)'),
+    platform: z.enum(['IOS', 'MAC_OS', 'TV_OS', 'VISION_OS']).default('IOS').describe('Platform'),
+  },
+  async ({ appId, versionString, platform }) => {
+    try {
+      const v = await resolveVersionId(appId, versionString, platform);
+      let md = `## Version Found\n\n`;
+      md += `| Field | Value |\n`;
+      md += `|-------|-------|\n`;
+      md += `| **Version** | ${v.attributes.versionString} |\n`;
+      md += `| **Platform** | ${v.attributes.platform} |\n`;
+      md += `| **State** | ${v.attributes.appStoreState} |\n`;
+      md += `| **Version ID** | \`${v.id}\` |\n`;
+      return { content: [{ type: 'text', text: md }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'asc_phased_release',
+  'Manage phased (gradual) release for a version. Actions: create (enable 7-day rollout), pause, resume, complete (release to everyone).',
+  {
+    versionId: z.string().describe('Version ID'),
+    action: z.enum(['create', 'pause', 'resume', 'complete']).describe('Phased release action'),
+  },
+  async ({ versionId, action }) => {
+    try {
+      const result = await managePhasedRelease(versionId, action);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'asc_release_version',
+  'Manually release a version that is approved and waiting for developer release (PENDING_DEVELOPER_RELEASE → READY_FOR_SALE).',
+  { versionId: z.string().describe('Version ID') },
+  async ({ versionId }) => {
+    try {
+      const result = await releaseVersion(versionId);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
 // =============================================================================
 // BUILDS & TESTFLIGHT
 // =============================================================================
@@ -397,11 +510,16 @@ server.tool(
 
 server.tool(
   'asc_submit_for_review',
-  'Submit a version for App Review. Runs pre-flight checks (build attached, descriptions filled, etc.) before submitting.',
-  { versionId: z.string().describe('Version ID') },
-  async ({ versionId }) => {
+  'Submit a version for App Review. Accepts either versionId directly OR appId+versionString to auto-resolve. Runs pre-flight checks before submitting.',
+  {
+    versionId: z.string().optional().describe('Version ID (provide this OR appId+versionString)'),
+    appId: z.string().optional().describe('App ID (use with versionString instead of versionId)'),
+    versionString: z.string().optional().describe('Version string like "1.6.0" (use with appId instead of versionId)'),
+    platform: z.enum(['IOS', 'MAC_OS', 'TV_OS', 'VISION_OS']).default('IOS').optional().describe('Platform (when using versionString)'),
+  },
+  async ({ versionId, appId, versionString, platform }) => {
     try {
-      const result = await submitForReview(versionId);
+      const result = await submitForReview(versionId, appId, versionString, platform);
       return { content: [{ type: 'text', text: result }] };
     } catch (e) {
       return { content: [{ type: 'text', text: handleError(e) }], isError: true };
@@ -535,6 +653,627 @@ server.tool(
   async ({ screenshotSetId }) => {
     try {
       const result = await deleteAllScreenshotsInSet(screenshotSetId);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+// =============================================================================
+// CUSTOMER REVIEWS
+// =============================================================================
+
+server.tool(
+  'asc_list_customer_reviews',
+  'List App Store customer reviews with ratings, text, and your responses. Useful for monitoring user feedback.',
+  {
+    appId: z.string().describe('App ID'),
+    sort: z.enum(['-createdDate', 'createdDate', '-rating', 'rating']).default('-createdDate').describe('Sort order'),
+    limit: z.number().min(1).max(200).default(20).describe('Number of reviews to fetch'),
+  },
+  async ({ appId, sort, limit }) => {
+    try {
+      const result = await listCustomerReviews(appId, sort, limit);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'asc_respond_to_review',
+  'Respond to a customer review on the App Store. Creates or updates your developer response.',
+  {
+    reviewId: z.string().describe('Review ID (from asc_list_customer_reviews)'),
+    responseBody: z.string().describe('Your response text (visible on App Store)'),
+  },
+  async ({ reviewId, responseBody }) => {
+    try {
+      const result = await respondToCustomerReview(reviewId, responseBody);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+// =============================================================================
+// BETA TESTERS
+// =============================================================================
+
+server.tool(
+  'asc_list_beta_testers',
+  'List TestFlight beta testers. Filter by app, beta group, or email.',
+  {
+    appId: z.string().optional().describe('Filter by App ID'),
+    betaGroupId: z.string().optional().describe('Filter by Beta Group ID'),
+    email: z.string().optional().describe('Filter by email address'),
+    limit: z.number().min(1).max(200).default(50).describe('Number of testers to fetch'),
+  },
+  async ({ appId, betaGroupId, email, limit }) => {
+    try {
+      const result = await listBetaTesters(appId, betaGroupId, email, limit);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'asc_add_beta_tester',
+  'Add a beta tester to a TestFlight group. Sends an invitation email automatically.',
+  {
+    betaGroupId: z.string().describe('Beta Group ID (from asc_list_beta_groups)'),
+    email: z.string().email().describe('Tester email address'),
+    firstName: z.string().optional().describe('Tester first name'),
+    lastName: z.string().optional().describe('Tester last name'),
+  },
+  async ({ betaGroupId, email, firstName, lastName }) => {
+    try {
+      const result = await addBetaTester(betaGroupId, email, firstName, lastName);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'asc_remove_beta_tester',
+  'Remove a beta tester from a TestFlight group.',
+  {
+    betaGroupId: z.string().describe('Beta Group ID'),
+    testerId: z.string().describe('Tester ID (from asc_list_beta_testers)'),
+  },
+  async ({ betaGroupId, testerId }) => {
+    try {
+      const result = await removeBetaTester(betaGroupId, testerId);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'asc_create_beta_group',
+  'Create a new TestFlight beta group (internal or external).',
+  {
+    appId: z.string().describe('App ID'),
+    name: z.string().describe('Group name'),
+    isInternal: z.boolean().default(false).describe('Whether this is an internal group'),
+    publicLinkEnabled: z.boolean().default(false).describe('Enable public TestFlight link'),
+  },
+  async ({ appId, name, isInternal, publicLinkEnabled }) => {
+    try {
+      const result = await createBetaGroup(appId, name, isInternal, publicLinkEnabled);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'asc_delete_beta_group',
+  'Delete a TestFlight beta group.',
+  { betaGroupId: z.string().describe('Beta Group ID') },
+  async ({ betaGroupId }) => {
+    try {
+      const result = await deleteBetaGroup(betaGroupId);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+// =============================================================================
+// IN-APP PURCHASES & SUBSCRIPTIONS
+// =============================================================================
+
+server.tool(
+  'asc_list_in_app_purchases',
+  'List all in-app purchases for an app with their product IDs, types, and states.',
+  { appId: z.string().describe('App ID') },
+  async ({ appId }) => {
+    try {
+      const result = await listInAppPurchases(appId);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'asc_list_subscriptions',
+  'List subscription groups and their subscriptions for an app.',
+  { appId: z.string().describe('App ID') },
+  async ({ appId }) => {
+    try {
+      const result = await listSubscriptionGroups(appId);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'asc_get_app_pricing',
+  'Get app pricing schedule and available territories (countries where the app is available).',
+  { appId: z.string().describe('App ID') },
+  async ({ appId }) => {
+    try {
+      const result = await getAppPricing(appId);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+// =============================================================================
+// DIAGNOSTICS & ANALYTICS
+// =============================================================================
+
+server.tool(
+  'asc_get_build_diagnostics',
+  'Get crash diagnostic signatures and logs for a build. Use to investigate crash issues after release.',
+  { buildId: z.string().describe('Build ID') },
+  async ({ buildId }) => {
+    try {
+      const result = await getBuildDiagnostics(buildId);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'asc_get_perf_metrics',
+  'Get performance and power metrics for an app (battery, launch time, memory, hangs, disk, animation, termination).',
+  {
+    appId: z.string().describe('App ID'),
+    metricType: z.enum(['DISK', 'HANG', 'BATTERY', 'LAUNCH', 'MEMORY', 'ANIMATION', 'TERMINATION']).optional().describe('Filter by metric type'),
+    platform: z.string().optional().describe('Filter by platform (e.g., IOS)'),
+  },
+  async ({ appId, metricType, platform }) => {
+    try {
+      const result = await getPerfPowerMetrics(appId, metricType, platform);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'asc_request_analytics_report',
+  'Request generation of an analytics report. Use asc_get_analytics_report to download once ready.',
+  {
+    appId: z.string().describe('App ID'),
+    category: z.enum(['APP_USAGE', 'APP_STORE_ENGAGEMENT', 'COMMERCE', 'FRAMEWORK_USAGE', 'PERFORMANCE']).describe('Report category'),
+  },
+  async ({ appId, category }) => {
+    try {
+      const result = await requestAnalyticsReport(appId, category);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'asc_get_analytics_report',
+  'Check status and download a previously requested analytics report.',
+  { requestId: z.string().describe('Report request ID (from asc_request_analytics_report)') },
+  async ({ requestId }) => {
+    try {
+      const result = await getAnalyticsReport(requestId);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+// =============================================================================
+// AGE RATING & APP AVAILABILITY
+// =============================================================================
+
+server.tool(
+  'asc_get_age_rating',
+  'Get the age rating declaration for a version. Shows all content rating fields.',
+  { versionId: z.string().describe('Version ID') },
+  async ({ versionId }) => {
+    try {
+      const result = await getAgeRating(versionId);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'asc_update_age_rating',
+  'Update age rating declaration. Enum fields use NONE, INFREQUENT_OR_MILD, or FREQUENT_OR_INTENSE. Boolean fields for gambling, unrestrictedWebAccess, seventeenPlus.',
+  {
+    ageRatingDeclarationId: z.string().describe('Age Rating Declaration ID (from asc_get_age_rating)'),
+    alcoholTobaccoOrDrugUseOrReferences: z.enum(['NONE', 'INFREQUENT_OR_MILD', 'FREQUENT_OR_INTENSE']).optional(),
+    contests: z.enum(['NONE', 'INFREQUENT_OR_MILD', 'FREQUENT_OR_INTENSE']).optional(),
+    gamblingSimulated: z.enum(['NONE', 'INFREQUENT_OR_MILD', 'FREQUENT_OR_INTENSE']).optional(),
+    horrorOrFearThemes: z.enum(['NONE', 'INFREQUENT_OR_MILD', 'FREQUENT_OR_INTENSE']).optional(),
+    matureOrSuggestiveThemes: z.enum(['NONE', 'INFREQUENT_OR_MILD', 'FREQUENT_OR_INTENSE']).optional(),
+    medicalOrTreatmentInformation: z.enum(['NONE', 'INFREQUENT_OR_MILD', 'FREQUENT_OR_INTENSE']).optional(),
+    profanityOrCrudeHumor: z.enum(['NONE', 'INFREQUENT_OR_MILD', 'FREQUENT_OR_INTENSE']).optional(),
+    sexualContentGraphicAndNudity: z.enum(['NONE', 'INFREQUENT_OR_MILD', 'FREQUENT_OR_INTENSE']).optional(),
+    sexualContentOrNudity: z.enum(['NONE', 'INFREQUENT_OR_MILD', 'FREQUENT_OR_INTENSE']).optional(),
+    violenceCartoonOrFantasy: z.enum(['NONE', 'INFREQUENT_OR_MILD', 'FREQUENT_OR_INTENSE']).optional(),
+    violenceRealistic: z.enum(['NONE', 'INFREQUENT_OR_MILD', 'FREQUENT_OR_INTENSE']).optional(),
+    violenceRealisticProlonged: z.enum(['NONE', 'INFREQUENT_OR_MILD', 'FREQUENT_OR_INTENSE']).optional(),
+    gambling: z.boolean().optional(),
+    unrestrictedWebAccess: z.boolean().optional(),
+    seventeenPlus: z.boolean().optional(),
+  },
+  async ({ ageRatingDeclarationId, ...updates }) => {
+    try {
+      const result = await updateAgeRating(ageRatingDeclarationId, updates);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'asc_manage_availability',
+  'Manage app territory availability. Actions: get (list territories), remove_from_sale (remove specific territories), restore (re-enable territories).',
+  {
+    appId: z.string().describe('App ID'),
+    action: z.enum(['get', 'remove_from_sale', 'restore']).describe('Action to perform'),
+    territoryCodes: z.array(z.string()).optional().describe('Territory codes (e.g., ["US", "TR", "DE"]) — required for remove_from_sale, optional for restore'),
+  },
+  async ({ appId, action, territoryCodes }) => {
+    try {
+      const result = await manageAppAvailability(appId, action, territoryCodes);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'asc_upload_review_attachment',
+  'Upload an attachment (screenshot/video) for App Review. Useful when responding to rejections with evidence.',
+  {
+    versionId: z.string().describe('Version ID'),
+    filePath: z.string().describe('Absolute path to the file on disk'),
+    fileName: z.string().describe('File name (e.g., demo_walkthrough.png)'),
+  },
+  async ({ versionId, filePath, fileName }) => {
+    try {
+      const result = await uploadReviewAttachment(versionId, filePath, fileName);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+// =============================================================================
+// CERTIFICATES & DEVICES
+// =============================================================================
+
+server.tool(
+  'asc_list_certificates',
+  'List signing certificates with expiration dates. Warns about certificates expiring within 30 days.',
+  {
+    certificateType: z.enum([
+      'IOS_DEVELOPMENT', 'IOS_DISTRIBUTION', 'MAC_APP_DISTRIBUTION',
+      'MAC_INSTALLER_DISTRIBUTION', 'MAC_APP_DEVELOPMENT', 'DEVELOPER_ID_KEXT',
+      'DEVELOPER_ID_APPLICATION', 'DEVELOPMENT', 'DISTRIBUTION',
+    ]).optional().describe('Filter by certificate type'),
+  },
+  async ({ certificateType }) => {
+    try {
+      const result = await listCertificates(certificateType);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'asc_register_device',
+  'Register a new test device for development/ad-hoc provisioning.',
+  {
+    name: z.string().describe('Device name (e.g., "Mali iPhone 15")'),
+    udid: z.string().describe('Device UDID'),
+    platform: z.enum(['IOS', 'MAC_OS']).default('IOS').describe('Platform'),
+  },
+  async ({ name, udid, platform }) => {
+    try {
+      const result = await registerDevice(name, udid, platform);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'asc_list_devices',
+  'List all registered test devices.',
+  {
+    platform: z.enum(['IOS', 'MAC_OS']).optional().describe('Filter by platform'),
+  },
+  async ({ platform }) => {
+    try {
+      const result = await listDevices(platform);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+// =============================================================================
+// BETA REVIEW
+// =============================================================================
+
+server.tool(
+  'asc_submit_for_beta_review',
+  'Submit a build for external TestFlight beta review. Required before external testers can access the build.',
+  { buildId: z.string().describe('Build ID') },
+  async ({ buildId }) => {
+    try {
+      const result = await submitForBetaReview(buildId);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'asc_get_beta_review_status',
+  'Check the beta review status for a build (external TestFlight review).',
+  { buildId: z.string().describe('Build ID') },
+  async ({ buildId }) => {
+    try {
+      const result = await getBetaReviewStatus(buildId);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+// =============================================================================
+// SANDBOX TESTERS
+// =============================================================================
+
+server.tool(
+  'asc_list_sandbox_testers',
+  'List sandbox testers for in-app purchase testing.',
+  {},
+  async () => {
+    try {
+      const result = await listSandboxTesters();
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'asc_clear_sandbox_history',
+  'Clear purchase history for a sandbox tester. Useful for re-testing IAP flows.',
+  { testerId: z.string().describe('Sandbox tester ID (from asc_list_sandbox_testers)') },
+  async ({ testerId }) => {
+    try {
+      const result = await clearSandboxTesterHistory(testerId);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+// =============================================================================
+// IN-APP EVENTS
+// =============================================================================
+
+server.tool(
+  'asc_list_app_events',
+  'List in-app events for an app (promotions, live events, challenges, etc.) with localizations.',
+  { appId: z.string().describe('App ID') },
+  async ({ appId }) => {
+    try {
+      const result = await listAppEvents(appId);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'asc_create_app_event',
+  'Create a new in-app event (promotion, live event, challenge, etc.) for the App Store.',
+  {
+    appId: z.string().describe('App ID'),
+    referenceName: z.string().describe('Internal reference name'),
+    deepLink: z.string().describe('Deep link URL that opens to this event in the app'),
+    purpose: z.enum(['APPROPRIATE_FOR_ALL_USERS', 'LIVE_EVENT', 'PREMIERE', 'CHALLENGE', 'COMPETITION', 'NEW_SEASON', 'MAJOR_UPDATE', 'SPECIAL_EVENT']).describe('Event purpose'),
+    badge: z.enum(['LIVE_EVENT', 'PREMIERE', 'CHALLENGE', 'COMPETITION', 'NEW_SEASON', 'MAJOR_UPDATE', 'SPECIAL_EVENT']).describe('Event badge shown on App Store'),
+    priority: z.enum(['HIGH', 'NORMAL']).default('NORMAL').describe('Event priority'),
+    purchaseRequirement: z.enum(['NO_COST_ASSOCIATED', 'IN_APP_PURCHASE', 'SUBSCRIPTION', 'IN_APP_PURCHASE_AND_SUBSCRIPTION', 'IN_APP_PURCHASE_OR_SUBSCRIPTION']).describe('Purchase requirement'),
+    territorySchedules: z.array(z.object({
+      territories: z.array(z.string()),
+      publishStart: z.string(),
+      eventStart: z.string(),
+      eventEnd: z.string(),
+    })).describe('Territory schedules with dates'),
+  },
+  async ({ appId, referenceName, deepLink, purpose, badge, priority, purchaseRequirement, territorySchedules }) => {
+    try {
+      const result = await createAppEvent(appId, referenceName, deepLink, purpose, badge, priority, purchaseRequirement, territorySchedules);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+// =============================================================================
+// CUSTOM PRODUCT PAGES
+// =============================================================================
+
+server.tool(
+  'asc_list_custom_product_pages',
+  'List custom product pages for an app (alternate App Store listings for different audiences).',
+  { appId: z.string().describe('App ID') },
+  async ({ appId }) => {
+    try {
+      const result = await listCustomProductPages(appId);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+// =============================================================================
+// SCREENSHOT SETS & APP PREVIEWS
+// =============================================================================
+
+server.tool(
+  'asc_create_screenshot_set',
+  'Create a new screenshot set for a specific device type (e.g., iPhone 6.7", iPad Pro 12.9").',
+  {
+    versionLocalizationId: z.string().describe('Version Localization ID'),
+    displayType: z.enum([
+      'APP_IPHONE_67', 'APP_IPHONE_61', 'APP_IPHONE_65', 'APP_IPHONE_58',
+      'APP_IPHONE_55', 'APP_IPHONE_47', 'APP_IPAD_PRO_3GEN_129',
+      'APP_IPAD_PRO_3GEN_11', 'APP_IPAD_PRO_129', 'APP_IPAD_105',
+    ]).describe('Screenshot display type (device size)'),
+  },
+  async ({ versionLocalizationId, displayType }) => {
+    try {
+      const result = await createScreenshotSet(versionLocalizationId, displayType);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'asc_reorder_screenshots',
+  'Reorder screenshots within a screenshot set. Provide screenshot IDs in desired order.',
+  {
+    screenshotSetId: z.string().describe('Screenshot Set ID'),
+    screenshotIds: z.array(z.string()).describe('Ordered array of screenshot IDs'),
+  },
+  async ({ screenshotSetId, screenshotIds }) => {
+    try {
+      const result = await reorderScreenshots(screenshotSetId, screenshotIds);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'asc_list_preview_sets',
+  'List app preview (video) sets for a version localization.',
+  { versionLocalizationId: z.string().describe('Version Localization ID') },
+  async ({ versionLocalizationId }) => {
+    try {
+      const result = await listPreviewSets(versionLocalizationId);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'asc_create_preview_set',
+  'Create a new app preview (video) set for a device type.',
+  {
+    versionLocalizationId: z.string().describe('Version Localization ID'),
+    previewType: z.string().describe('Preview type (same device types as screenshot sets, e.g., APP_IPHONE_67)'),
+  },
+  async ({ versionLocalizationId, previewType }) => {
+    try {
+      const result = await createPreviewSet(versionLocalizationId, previewType);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'asc_upload_app_preview',
+  'Upload an app preview video (MP4/MOV/M4V). Handles 3-step upload process.',
+  {
+    previewSetId: z.string().describe('Preview Set ID'),
+    filePath: z.string().describe('Absolute path to the video file'),
+    fileName: z.string().describe('File name (e.g., preview_home.mp4)'),
+    mimeType: z.string().optional().describe('MIME type (auto-detected from extension if not provided)'),
+  },
+  async ({ previewSetId, filePath, fileName, mimeType }) => {
+    try {
+      const result = await uploadAppPreview(previewSetId, filePath, fileName, mimeType);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'asc_delete_app_preview',
+  'Delete an app preview video.',
+  { previewId: z.string().describe('Preview ID') },
+  async ({ previewId }) => {
+    try {
+      const result = await deleteAppPreview(previewId);
       return { content: [{ type: 'text', text: result }] };
     } catch (e) {
       return { content: [{ type: 'text', text: handleError(e) }], isError: true };
