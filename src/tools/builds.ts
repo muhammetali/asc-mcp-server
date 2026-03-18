@@ -168,6 +168,28 @@ export async function setBetaBuildLocalization(
   return `## TestFlight What's New Updated\n\n**Build:** \`${buildId}\`\n**Locale:** ${locale}\n**Text:** ${whatsNew}`;
 }
 
+export async function setEncryption(buildId: string, usesNonExemptEncryption: boolean): Promise<string> {
+  await ascPatch(`/v1/builds/${buildId}`, {
+    data: {
+      type: 'builds',
+      id: buildId,
+      attributes: { usesNonExemptEncryption },
+    },
+  });
+
+  let md = `## Encryption Declaration Updated\n\n`;
+  md += `| Field | Value |\n`;
+  md += `|-------|-------|\n`;
+  md += `| **Build ID** | ${buildId} |\n`;
+  md += `| **Uses Non-Exempt Encryption** | ${usesNonExemptEncryption} |\n`;
+  md += `\n**Status:** Updated successfully.`;
+  if (!usesNonExemptEncryption) {
+    md += ` No export compliance documentation required.`;
+  }
+
+  return md;
+}
+
 function getProcessingIcon(state: string): string {
   switch (state) {
     case 'VALID': return '[OK]';

@@ -68,14 +68,53 @@ describe('tools/review', () => {
       expect(result).toContain('VALID');
     });
 
+    it('should reject if encryption declaration is not set', async () => {
+      global.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({
+          data: { id: 'v1', attributes: { versionString: '2.0.0', appStoreState: 'PREPARE_FOR_SUBMISSION', platform: 'IOS' } },
+          included: [
+            { type: 'builds', id: 'b1', attributes: { version: '42', processingState: 'VALID', usesNonExemptEncryption: null } },
+            { type: 'appStoreVersionLocalizations', id: 'loc-1', attributes: { locale: 'en-US', description: 'Great app', whatsNew: 'Fixes' } },
+          ],
+        }), { status: 200 })
+      );
+
+      const { submitForReview } = await import('../tools/review.js');
+      const result = await submitForReview('v1');
+
+      expect(result).toContain('Error');
+      expect(result).toContain('encryption');
+      expect(result).toContain('asc_set_encryption');
+    });
+
+    it('should reject if What\'s New is empty for any locale', async () => {
+      global.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({
+          data: { id: 'v1', attributes: { versionString: '2.0.0', appStoreState: 'PREPARE_FOR_SUBMISSION', platform: 'IOS' } },
+          included: [
+            { type: 'builds', id: 'b1', attributes: { version: '42', processingState: 'VALID', usesNonExemptEncryption: false } },
+            { type: 'appStoreVersionLocalizations', id: 'loc-1', attributes: { locale: 'en-US', description: 'Great app', whatsNew: 'Fixes' } },
+            { type: 'appStoreVersionLocalizations', id: 'loc-2', attributes: { locale: 'tr', description: 'Harika uygulama', whatsNew: null } },
+          ],
+        }), { status: 200 })
+      );
+
+      const { submitForReview } = await import('../tools/review.js');
+      const result = await submitForReview('v1');
+
+      expect(result).toContain('Error');
+      expect(result).toContain("Empty What's New");
+      expect(result).toContain('tr');
+    });
+
     it('should reject if descriptions are empty', async () => {
       global.fetch = vi.fn().mockResolvedValue(
         new Response(JSON.stringify({
           data: { id: 'v1', attributes: { versionString: '2.0.0', appStoreState: 'PREPARE_FOR_SUBMISSION', platform: 'IOS' } },
           included: [
-            { type: 'builds', id: 'b1', attributes: { version: '42', processingState: 'VALID' } },
+            { type: 'builds', id: 'b1', attributes: { version: '42', processingState: 'VALID', usesNonExemptEncryption: false } },
             { type: 'appStoreVersionLocalizations', id: 'loc-1', attributes: { locale: 'en-US', description: 'Great app', whatsNew: 'Fixes' } },
-            { type: 'appStoreVersionLocalizations', id: 'loc-2', attributes: { locale: 'tr', description: null, whatsNew: 'Fixes' } },
+            { type: 'appStoreVersionLocalizations', id: 'loc-2', attributes: { locale: 'tr', description: null, whatsNew: 'Düzeltmeler' } },
           ],
         }), { status: 200 })
       );
@@ -88,24 +127,40 @@ describe('tools/review', () => {
       expect(result).toContain('tr');
     });
 
-    it('should submit successfully when all checks pass', async () => {
+    it('should submit successfully using new reviewSubmissions API', async () => {
       let callCount = 0;
       global.fetch = vi.fn().mockImplementation((url: string, options?: any) => {
         callCount++;
         if (callCount === 1) {
-          // Pre-flight GET
+          // Pre-flight GET (version details with build, locs)
           return Promise.resolve(new Response(JSON.stringify({
-            data: { id: 'v1', attributes: { versionString: '2.0.0', appStoreState: 'PREPARE_FOR_SUBMISSION', platform: 'IOS' } },
+            data: {
+              id: 'v1',
+              attributes: { versionString: '2.0.0', appStoreState: 'PREPARE_FOR_SUBMISSION', platform: 'IOS' },
+              relationships: { app: { data: { type: 'apps', id: 'app-1' } } },
+            },
             included: [
-              { type: 'builds', id: 'b1', attributes: { version: '42', processingState: 'VALID' } },
+              { type: 'builds', id: 'b1', attributes: { version: '42', processingState: 'VALID', usesNonExemptEncryption: false } },
               { type: 'appStoreVersionLocalizations', id: 'loc-1', attributes: { locale: 'en-US', description: 'Great app', whatsNew: 'Fixes' } },
             ],
           }), { status: 200 }));
         }
-        // POST submission
+        if (callCount === 2) {
+          // POST /v1/reviewSubmissions
+          return Promise.resolve(new Response(JSON.stringify({
+            data: { id: 'rs-1', type: 'reviewSubmissions', attributes: { state: 'READY_FOR_REVIEW' } },
+          }), { status: 201 }));
+        }
+        if (callCount === 3) {
+          // POST /v1/reviewSubmissionItems
+          return Promise.resolve(new Response(JSON.stringify({
+            data: { id: 'rsi-1', type: 'reviewSubmissionItems' },
+          }), { status: 201 }));
+        }
+        // PATCH /v1/reviewSubmissions/:id (submit)
         return Promise.resolve(new Response(JSON.stringify({
-          data: { id: 'sub-1', type: 'appStoreVersionSubmissions' },
-        }), { status: 201 }));
+          data: { id: 'rs-1', type: 'reviewSubmissions', attributes: { state: 'WAITING_FOR_REVIEW' } },
+        }), { status: 200 }));
       });
 
       const { submitForReview } = await import('../tools/review.js');
@@ -115,6 +170,8 @@ describe('tools/review', () => {
       expect(result).toContain('2.0.0');
       expect(result).toContain('42');
       expect(result).toContain('24-48 hours');
+      expect(result).toContain('rs-1'); // Submission ID
+      expect(callCount).toBe(4); // 1 GET + 3 POST/PATCH
     });
   });
 
@@ -171,7 +228,7 @@ describe('tools/review', () => {
   });
 
   describe('getRejectionReasons', () => {
-    it('should show common GoyGoyChat rejection patterns', async () => {
+    it('should show common rejection patterns', async () => {
       global.fetch = vi.fn().mockImplementation((url: string) => {
         if (url.includes('filter')) {
           return Promise.resolve(new Response(JSON.stringify({
@@ -193,7 +250,8 @@ describe('tools/review', () => {
       expect(result).toContain('v1.9.0');
       expect(result).toContain('4.3 Spam');
       expect(result).toContain('5.1.1 Privacy');
-      expect(result).toContain('GoyGoyChat');
+      // Should NOT contain hardcoded app name
+      expect(result).not.toContain('GoyGoyChat');
     });
 
     it('should handle no rejections gracefully', async () => {

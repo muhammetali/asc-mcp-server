@@ -1,4 +1,4 @@
-// GoyGoyChat supported locales - Single Source of Truth
+// Supported locales - Single Source of Truth
 export const PROJECT_LOCALES = ['en-US', 'tr', 'de-DE', 'es-MX', 'fr-FR', 'ru', 'ar-SA'] as const;
 export type ProjectLocale = (typeof PROJECT_LOCALES)[number];
 

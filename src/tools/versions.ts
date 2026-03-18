@@ -1,4 +1,4 @@
-import { ascGet, ascPost, ascPatch, type ASCResponse } from '../client.js';
+import { ascGet, ascPost, ascPatch, ascDelete, type ASCResponse } from '../client.js';
 import { PROJECT_LOCALES } from '../constants.js';
 
 export async function listVersions(appId: string, platform?: string): Promise<string> {
@@ -250,6 +250,32 @@ export async function assignBuildToVersion(versionId: string, buildId: string): 
   });
 
   return `## Build Assigned\n\n**Build** \`${buildId}\` assigned to **version** \`${versionId}\`.\n\nNext: Use \`asc_submit_for_review\` when ready.`;
+}
+
+export async function deleteVersion(versionId: string): Promise<string> {
+  // Verify the version state first
+  const versionResult = await ascGet<ASCResponse>(`/v1/appStoreVersions/${versionId}`, {
+    'fields[appStoreVersions]': 'versionString,appStoreState,platform',
+  });
+
+  const va = versionResult.data.attributes;
+  const deletableStates = ['PREPARE_FOR_SUBMISSION', 'DEVELOPER_REJECTED', 'REJECTED'];
+
+  if (!deletableStates.includes(va.appStoreState)) {
+    return `**Error:** Version v${va.versionString} is in state \`${va.appStoreState}\`. Can only delete versions in PREPARE_FOR_SUBMISSION, DEVELOPER_REJECTED, or REJECTED state.`;
+  }
+
+  await ascDelete(`/v1/appStoreVersions/${versionId}`);
+
+  let md = `## Version Deleted\n\n`;
+  md += `| Field | Value |\n`;
+  md += `|-------|-------|\n`;
+  md += `| **Version** | ${va.versionString} |\n`;
+  md += `| **Platform** | ${va.platform} |\n`;
+  md += `| **Previous State** | ${va.appStoreState} |\n`;
+  md += `\n**Status:** Version deleted successfully.`;
+
+  return md;
 }
 
 function getStateIndicator(state: string): string {

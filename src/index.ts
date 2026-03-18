@@ -19,11 +19,12 @@ import { listApps, getAppInfo, updateAppInfoLocalization } from './tools/apps.js
 import {
   listVersions, createVersion, updateWhatsNew,
   updateVersionLocalization, getVersionLocalizations,
-  assignBuildToVersion,
+  assignBuildToVersion, deleteVersion,
 } from './tools/versions.js';
 import {
   listBuilds, getBuildDetails, listBetaGroups,
   addBuildToBetaGroup, setBetaBuildLocalization,
+  setEncryption,
 } from './tools/builds.js';
 import {
   getReviewSubmission, updateReviewDetail,
@@ -321,6 +322,37 @@ server.tool(
   }
 );
 
+server.tool(
+  'asc_set_encryption',
+  'Set the export compliance (usesNonExemptEncryption) flag on a build. Required before submitting for review. Most apps should set this to false.',
+  {
+    buildId: z.string().describe('Build ID (from asc_list_builds)'),
+    usesNonExemptEncryption: z.boolean().default(false).describe('Whether the app uses non-exempt encryption. Set to false for most apps (standard HTTPS only).'),
+  },
+  async ({ buildId, usesNonExemptEncryption }) => {
+    try {
+      const result = await setEncryption(buildId, usesNonExemptEncryption);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'asc_delete_version',
+  'Delete a draft or rejected App Store version. Only works for versions in PREPARE_FOR_SUBMISSION, DEVELOPER_REJECTED, or REJECTED state.',
+  { versionId: z.string().describe('Version ID (from asc_list_versions)') },
+  async ({ versionId }) => {
+    try {
+      const result = await deleteVersion(versionId);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
 // =============================================================================
 // REVIEW & SUBMISSION
 // =============================================================================
@@ -393,7 +425,7 @@ server.tool(
 
 server.tool(
   'asc_get_rejection_reasons',
-  'List recent rejected versions with rejection context. Includes common rejection reasons for GoyGoyChat.',
+  'List recent rejected versions with rejection context and common rejection reasons.',
   { appId: z.string().describe('App ID') },
   async ({ appId }) => {
     try {
