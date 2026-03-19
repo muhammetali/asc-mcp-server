@@ -910,11 +910,11 @@ server.tool(
 
 server.tool(
   'asc_get_age_rating',
-  'Get the age rating declaration for a version. Shows all content rating fields.',
-  { versionId: z.string().describe('Version ID') },
-  async ({ versionId }) => {
+  'Get the age rating declaration for an app. Shows all content rating fields, app features (lootBox, messaging, UGC), and overrides.',
+  { appId: z.string().describe('App ID (from asc_list_apps)') },
+  async ({ appId }) => {
     try {
-      const result = await getAgeRating(versionId);
+      const result = await getAgeRating(appId);
       return { content: [{ type: 'text', text: result }] };
     } catch (e) {
       return { content: [{ type: 'text', text: handleError(e) }], isError: true };
@@ -927,9 +927,11 @@ server.tool(
   'Update age rating declaration. Enum fields use NONE, INFREQUENT_OR_MILD, or FREQUENT_OR_INTENSE. Boolean fields for gambling, unrestrictedWebAccess, seventeenPlus.',
   {
     ageRatingDeclarationId: z.string().describe('Age Rating Declaration ID (from asc_get_age_rating)'),
+    // Content descriptors (enum)
     alcoholTobaccoOrDrugUseOrReferences: z.enum(['NONE', 'INFREQUENT_OR_MILD', 'FREQUENT_OR_INTENSE']).optional(),
     contests: z.enum(['NONE', 'INFREQUENT_OR_MILD', 'FREQUENT_OR_INTENSE']).optional(),
     gamblingSimulated: z.enum(['NONE', 'INFREQUENT_OR_MILD', 'FREQUENT_OR_INTENSE']).optional(),
+    gunsOrOtherWeapons: z.enum(['NONE', 'INFREQUENT_OR_MILD', 'FREQUENT_OR_INTENSE']).optional(),
     horrorOrFearThemes: z.enum(['NONE', 'INFREQUENT_OR_MILD', 'FREQUENT_OR_INTENSE']).optional(),
     matureOrSuggestiveThemes: z.enum(['NONE', 'INFREQUENT_OR_MILD', 'FREQUENT_OR_INTENSE']).optional(),
     medicalOrTreatmentInformation: z.enum(['NONE', 'INFREQUENT_OR_MILD', 'FREQUENT_OR_INTENSE']).optional(),
@@ -938,10 +940,20 @@ server.tool(
     sexualContentOrNudity: z.enum(['NONE', 'INFREQUENT_OR_MILD', 'FREQUENT_OR_INTENSE']).optional(),
     violenceCartoonOrFantasy: z.enum(['NONE', 'INFREQUENT_OR_MILD', 'FREQUENT_OR_INTENSE']).optional(),
     violenceRealistic: z.enum(['NONE', 'INFREQUENT_OR_MILD', 'FREQUENT_OR_INTENSE']).optional(),
-    violenceRealisticProlonged: z.enum(['NONE', 'INFREQUENT_OR_MILD', 'FREQUENT_OR_INTENSE']).optional(),
-    gambling: z.boolean().optional(),
+    violenceRealisticProlongedGraphicOrSadistic: z.enum(['NONE', 'INFREQUENT_OR_MILD', 'FREQUENT_OR_INTENSE']).optional().describe('Prolonged, graphic, or sadistic realistic violence'),
+    // Boolean flags
+    gambling: z.boolean().optional().describe('Real money gambling'),
+    lootBox: z.boolean().optional().describe('Contains loot boxes / random paid items'),
+    messagingAndChat: z.boolean().optional().describe('Contains messaging or chat features'),
+    userGeneratedContent: z.boolean().optional().describe('Contains user-generated content'),
     unrestrictedWebAccess: z.boolean().optional(),
-    seventeenPlus: z.boolean().optional(),
+    advertising: z.boolean().optional().describe('Contains advertising'),
+    parentalControls: z.boolean().optional().describe('Has parental controls'),
+    healthOrWellnessTopics: z.boolean().optional().describe('Contains health or wellness topics'),
+    ageAssurance: z.boolean().optional().describe('Age assurance implemented'),
+    // Overrides
+    ageRatingOverride: z.enum(['NONE', 'SEVENTEEN_PLUS', 'UNRATED']).optional().describe('Manual age rating override'),
+    koreaAgeRatingOverride: z.enum(['NONE', 'TWELVE_PLUS', 'FIFTEEN_PLUS', 'EIGHTEEN_PLUS']).optional().describe('Korea-specific override'),
   },
   async ({ ageRatingDeclarationId, ...updates }) => {
     try {

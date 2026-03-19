@@ -11,8 +11,6 @@ export async function listScreenshotSets(versionLocalizationId: string): Promise
     `/v1/appStoreVersionLocalizations/${versionLocalizationId}/appScreenshotSets`,
     {
       'fields[appScreenshotSets]': 'screenshotDisplayType',
-      'include': 'appScreenshots',
-      'fields[appScreenshots]': 'fileName,fileSize,assetDeliveryState,uploadOperations',
     }
   );
 
@@ -22,23 +20,19 @@ export async function listScreenshotSets(versionLocalizationId: string): Promise
 
   let md = `## Screenshot Sets\n\n`;
 
-  const screenshots = (result.included || []).filter((i: any) => i.type === 'appScreenshots');
-  const ssMap = new Map<string, any[]>();
-  for (const ss of screenshots) {
-    // Find which set this screenshot belongs to
-    for (const set of result.data) {
-      const setScreenshots = set.relationships?.appScreenshots?.data || [];
-      if (setScreenshots.some((s: any) => s.id === ss.id)) {
-        if (!ssMap.has(set.id)) ssMap.set(set.id, []);
-        ssMap.get(set.id)!.push(ss);
-      }
-    }
-  }
-
+  // Fetch screenshots for each set directly via the dedicated endpoint.
+  // The `include=appScreenshots` approach fails silently when there are many
+  // screenshots (ASC API doesn't return them in `included` for large sets).
   for (const set of result.data) {
     const displayType = set.attributes.screenshotDisplayType;
-    const setScreenshots = ssMap.get(set.id) || [];
-    md += `### ${displayType}\n`;
+
+    const setResult = await ascGet<ASCResponse>(
+      `/v1/appScreenshotSets/${set.id}/appScreenshots`,
+      { 'fields[appScreenshots]': 'fileName,fileSize,assetDeliveryState' }
+    );
+    const setScreenshots = setResult.data || [];
+
+    md += `### ${displayType} (${setScreenshots.length} screenshots)\n`;
     md += `**Set ID:** \`${set.id}\`\n\n`;
 
     if (setScreenshots.length === 0) {

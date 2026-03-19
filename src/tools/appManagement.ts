@@ -5,36 +5,63 @@ import { ascGet, ascPost, ascPatch, ascUploadChunk, type ASCResponse } from '../
 import { RESOURCE_TYPES } from '../constants.js';
 import { validateId } from '../validation.js';
 
-export async function getAgeRating(versionId: string): Promise<string> {
-  validateId(versionId, 'versionId');
+export async function getAgeRating(appId: string): Promise<string> {
+  validateId(appId, 'appId');
 
-  const result = await ascGet<ASCResponse>(`/v1/appStoreVersions/${versionId}/ageRatingDeclaration`, {
-    'fields[ageRatingDeclarations]': 'alcoholTobaccoOrDrugUseOrReferences,contests,gamblingSimulated,horrorOrFearThemes,matureOrSuggestiveThemes,medicalOrTreatmentInformation,profanityOrCrudeHumor,sexualContentGraphicAndNudity,sexualContentOrNudity,violenceCartoonOrFantasy,violenceRealistic,violenceRealisticProlonged,gambling,unrestrictedWebAccess,kidsAgeBand,seventeenPlus',
+  // Age ratings live at the app level, not version level.
+  // Fetch via appInfos relationship which includes ageRatingDeclaration.
+  const result = await ascGet<ASCResponse>(`/v1/apps/${appId}/appInfos`, {
+    'include': 'ageRatingDeclaration',
   });
 
-  const d = result.data;
+  const ageRating = (result.included || []).find((i: any) => i.type === 'ageRatingDeclarations');
+
+  if (!ageRating) {
+    return `## Age Rating Declaration\n\nNo age rating declaration found for app \`${appId}\`. This usually means the app info hasn't been fully set up yet.`;
+  }
+
+  const d = ageRating;
   const a = d.attributes;
+
+  const bool = (v: any) => v !== undefined && v !== null ? String(v) : '-';
+  const str = (v: any) => v || '-';
 
   let md = `## Age Rating Declaration\n\n`;
   md += `**Declaration ID:** \`${d.id}\`\n\n`;
+  md += `### Content Descriptors\n\n`;
   md += `| Field | Value |\n`;
   md += `|-------|-------|\n`;
-  md += `| **Alcohol, Tobacco, or Drug Use** | ${a.alcoholTobaccoOrDrugUseOrReferences || '-'} |\n`;
-  md += `| **Contests** | ${a.contests || '-'} |\n`;
-  md += `| **Gambling (Simulated)** | ${a.gamblingSimulated || '-'} |\n`;
-  md += `| **Horror or Fear Themes** | ${a.horrorOrFearThemes || '-'} |\n`;
-  md += `| **Mature or Suggestive Themes** | ${a.matureOrSuggestiveThemes || '-'} |\n`;
-  md += `| **Medical or Treatment Information** | ${a.medicalOrTreatmentInformation || '-'} |\n`;
-  md += `| **Profanity or Crude Humor** | ${a.profanityOrCrudeHumor || '-'} |\n`;
-  md += `| **Sexual Content (Graphic & Nudity)** | ${a.sexualContentGraphicAndNudity || '-'} |\n`;
-  md += `| **Sexual Content or Nudity** | ${a.sexualContentOrNudity || '-'} |\n`;
-  md += `| **Violence (Cartoon or Fantasy)** | ${a.violenceCartoonOrFantasy || '-'} |\n`;
-  md += `| **Violence (Realistic)** | ${a.violenceRealistic || '-'} |\n`;
-  md += `| **Violence (Realistic, Prolonged)** | ${a.violenceRealisticProlonged || '-'} |\n`;
-  md += `| **Gambling** | ${a.gambling !== undefined ? String(a.gambling) : '-'} |\n`;
-  md += `| **Unrestricted Web Access** | ${a.unrestrictedWebAccess !== undefined ? String(a.unrestrictedWebAccess) : '-'} |\n`;
-  md += `| **Kids Age Band** | ${a.kidsAgeBand || '-'} |\n`;
-  md += `| **Seventeen Plus** | ${a.seventeenPlus !== undefined ? String(a.seventeenPlus) : '-'} |\n`;
+  md += `| **Alcohol, Tobacco, or Drug Use** | ${str(a.alcoholTobaccoOrDrugUseOrReferences)} |\n`;
+  md += `| **Contests** | ${str(a.contests)} |\n`;
+  md += `| **Gambling (Real Money)** | ${bool(a.gambling)} |\n`;
+  md += `| **Gambling (Simulated)** | ${str(a.gamblingSimulated)} |\n`;
+  md += `| **Guns or Other Weapons** | ${str(a.gunsOrOtherWeapons)} |\n`;
+  md += `| **Horror or Fear Themes** | ${str(a.horrorOrFearThemes)} |\n`;
+  md += `| **Mature or Suggestive Themes** | ${str(a.matureOrSuggestiveThemes)} |\n`;
+  md += `| **Medical or Treatment Information** | ${str(a.medicalOrTreatmentInformation)} |\n`;
+  md += `| **Profanity or Crude Humor** | ${str(a.profanityOrCrudeHumor)} |\n`;
+  md += `| **Sexual Content (Graphic & Nudity)** | ${str(a.sexualContentGraphicAndNudity)} |\n`;
+  md += `| **Sexual Content or Nudity** | ${str(a.sexualContentOrNudity)} |\n`;
+  md += `| **Violence (Cartoon or Fantasy)** | ${str(a.violenceCartoonOrFantasy)} |\n`;
+  md += `| **Violence (Realistic)** | ${str(a.violenceRealistic)} |\n`;
+  md += `| **Violence (Realistic, Prolonged)** | ${str(a.violenceRealisticProlongedGraphicOrSadistic)} |\n`;
+  md += `\n### App Features\n\n`;
+  md += `| Field | Value |\n`;
+  md += `|-------|-------|\n`;
+  md += `| **Loot Box** | ${bool(a.lootBox)} |\n`;
+  md += `| **Messaging and Chat** | ${bool(a.messagingAndChat)} |\n`;
+  md += `| **User Generated Content** | ${bool(a.userGeneratedContent)} |\n`;
+  md += `| **Unrestricted Web Access** | ${bool(a.unrestrictedWebAccess)} |\n`;
+  md += `| **Advertising** | ${bool(a.advertising)} |\n`;
+  md += `| **Parental Controls** | ${bool(a.parentalControls)} |\n`;
+  md += `| **Health or Wellness Topics** | ${bool(a.healthOrWellnessTopics)} |\n`;
+  md += `| **Age Assurance** | ${bool(a.ageAssurance)} |\n`;
+  md += `\n### Overrides\n\n`;
+  md += `| Field | Value |\n`;
+  md += `|-------|-------|\n`;
+  md += `| **Kids Age Band** | ${str(a.kidsAgeBand)} |\n`;
+  md += `| **Age Rating Override** | ${str(a.ageRatingOverride)} |\n`;
+  md += `| **Korea Age Rating Override** | ${str(a.koreaAgeRatingOverride)} |\n`;
 
   return md;
 }
@@ -42,9 +69,11 @@ export async function getAgeRating(versionId: string): Promise<string> {
 export async function updateAgeRating(
   ageRatingDeclarationId: string,
   updates: {
+    // Content descriptors (enum: NONE | INFREQUENT_OR_MILD | FREQUENT_OR_INTENSE)
     alcoholTobaccoOrDrugUseOrReferences?: string;
     contests?: string;
     gamblingSimulated?: string;
+    gunsOrOtherWeapons?: string;
     horrorOrFearThemes?: string;
     matureOrSuggestiveThemes?: string;
     medicalOrTreatmentInformation?: string;
@@ -53,11 +82,21 @@ export async function updateAgeRating(
     sexualContentOrNudity?: string;
     violenceCartoonOrFantasy?: string;
     violenceRealistic?: string;
-    violenceRealisticProlonged?: string;
+    violenceRealisticProlongedGraphicOrSadistic?: string;
+    // Boolean flags
     gambling?: boolean;
+    lootBox?: boolean;
+    messagingAndChat?: boolean;
+    userGeneratedContent?: boolean;
     unrestrictedWebAccess?: boolean;
+    advertising?: boolean;
+    parentalControls?: boolean;
+    healthOrWellnessTopics?: boolean;
+    ageAssurance?: boolean;
+    // Override strings
     kidsAgeBand?: string;
-    seventeenPlus?: boolean;
+    ageRatingOverride?: string;
+    koreaAgeRatingOverride?: string;
   }
 ): Promise<string> {
   validateId(ageRatingDeclarationId, 'ageRatingDeclarationId');

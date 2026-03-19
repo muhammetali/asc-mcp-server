@@ -71,20 +71,43 @@ describe('tools/review', () => {
       await expect(submitForReview('v1')).rejects.toThrow('encryption');
     });
 
-    it('should reject if What\'s New is empty for any locale', async () => {
-      global.fetch = vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({
-          data: { id: 'v1', attributes: { versionString: '2.0.0', appStoreState: 'PREPARE_FOR_SUBMISSION', platform: 'IOS' } },
+    it('should warn (not reject) if What\'s New is empty for any locale', async () => {
+      // Empty What's New is now a warning, not an error (first release use case).
+      // The submission should proceed but include a warning in the output.
+      const mockFetch = vi.fn()
+        // Pre-flight check
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          data: {
+            id: 'v1',
+            attributes: { versionString: '2.0.0', appStoreState: 'PREPARE_FOR_SUBMISSION', platform: 'IOS' },
+            relationships: { app: { data: { type: 'apps', id: 'app-1' } } },
+          },
           included: [
             { type: 'builds', id: 'b1', attributes: { version: '42', processingState: 'VALID', usesNonExemptEncryption: false } },
             { type: 'appStoreVersionLocalizations', id: 'loc-1', attributes: { locale: 'en-US', description: 'Great app', whatsNew: 'Fixes' } },
             { type: 'appStoreVersionLocalizations', id: 'loc-2', attributes: { locale: 'tr', description: 'Harika uygulama', whatsNew: null } },
           ],
-        }), { status: 200 })
-      );
+        }), { status: 200 }))
+        // Create reviewSubmission
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          data: { id: 'sub-1', type: 'reviewSubmissions' },
+        }), { status: 201 }))
+        // Add reviewSubmissionItem
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          data: { id: 'item-1', type: 'reviewSubmissionItems' },
+        }), { status: 201 }))
+        // Confirm submission
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          data: { id: 'sub-1', type: 'reviewSubmissions', attributes: { submitted: true } },
+        }), { status: 200 }));
+
+      global.fetch = mockFetch;
 
       const { submitForReview } = await import('../tools/review.js');
-      await expect(submitForReview('v1')).rejects.toThrow("Empty What's New");
+      const result = await submitForReview('v1');
+      expect(result).toContain('Submitted for Review');
+      expect(result).toContain("Empty What's New");
+      expect(result).toContain('OK for first release');
     });
 
     it('should reject if descriptions are empty', async () => {

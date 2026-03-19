@@ -80,29 +80,36 @@ describe('tools/screenshots', () => {
 
   describe('listScreenshotSets', () => {
     it('should display sets with screenshots', async () => {
-      global.fetch = vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({
+      // The function now fetches each set's screenshots separately via
+      // /v1/appScreenshotSets/{id}/appScreenshots instead of using include.
+      const mockFetch = vi.fn()
+        // First call: list screenshot sets
+        .mockResolvedValueOnce(new Response(JSON.stringify({
           data: [
-            {
-              id: 'set-1', attributes: { screenshotDisplayType: 'APP_IPHONE_67' },
-              relationships: { appScreenshots: { data: [{ id: 'ss-1' }] } },
-            },
-            {
-              id: 'set-2', attributes: { screenshotDisplayType: 'APP_IPAD_PRO_129' },
-              relationships: { appScreenshots: { data: [] } },
-            },
+            { id: 'set-1', attributes: { screenshotDisplayType: 'APP_IPHONE_67' } },
+            { id: 'set-2', attributes: { screenshotDisplayType: 'APP_IPAD_PRO_129' } },
           ],
-          included: [
+        }), { status: 200 }))
+        // Second call: screenshots for set-1
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          data: [
             { type: 'appScreenshots', id: 'ss-1', attributes: { fileName: 'home.png', fileSize: 512000, assetDeliveryState: { state: 'COMPLETE' } } },
           ],
-        }), { status: 200 })
-      );
+        }), { status: 200 }))
+        // Third call: screenshots for set-2 (empty)
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          data: [],
+        }), { status: 200 }));
+
+      global.fetch = mockFetch;
 
       const { listScreenshotSets } = await import('../tools/screenshots.js');
       const result = await listScreenshotSets('loc-1');
 
       expect(result).toContain('APP_IPHONE_67');
+      expect(result).toContain('1 screenshots');
       expect(result).toContain('APP_IPAD_PRO_129');
+      expect(result).toContain('0 screenshots');
       expect(result).toContain('home.png');
       expect(result).toContain('500 KB');
       expect(result).toContain('COMPLETE');
