@@ -140,8 +140,8 @@ export async function submitForReview(versionId?: string, appId?: string, versio
   const va = v.attributes;
 
   // Check state
-  if (va.appStoreState !== APP_STORE_STATES.PREPARE_FOR_SUBMISSION && va.appStoreState !== APP_STORE_STATES.REJECTED) {
-    throw new Error(`Version v${va.versionString} is in state \`${va.appStoreState}\`. Can only submit from PREPARE_FOR_SUBMISSION or REJECTED state.`);
+  if (va.appStoreState !== APP_STORE_STATES.PREPARE_FOR_SUBMISSION && va.appStoreState !== APP_STORE_STATES.REJECTED && va.appStoreState !== 'DEVELOPER_REJECTED') {
+    throw new Error(`Version v${va.versionString} is in state \`${va.appStoreState}\`. Can only submit from PREPARE_FOR_SUBMISSION, REJECTED, or DEVELOPER_REJECTED state.`);
   }
 
   // Check build attached
@@ -160,9 +160,12 @@ export async function submitForReview(versionId?: string, appId?: string, versio
 
   // Check localizations
   const locs = (versionResult.included || []).filter((i: any) => i.type === RESOURCE_TYPES.APP_STORE_VERSION_LOCALIZATIONS);
+  const warnings: string[] = [];
   const emptyWhatsNew = locs.filter((l: any) => !l.attributes.whatsNew);
   if (emptyWhatsNew.length > 0) {
-    throw new Error(`Empty What's New for locales: ${emptyWhatsNew.map((l: any) => l.attributes.locale).join(', ')}. Use \`asc_update_whats_new\` to set them.`);
+    // What's New is not required for the first app version (no previous version exists).
+    // Downgrade from error to warning so first submissions are not blocked.
+    warnings.push(`Empty What's New for: ${emptyWhatsNew.map((l: any) => l.attributes.locale).join(', ')} (OK for first release)`);
   }
   const emptyDesc = locs.filter((l: any) => !l.attributes.description);
   if (emptyDesc.length > 0) {
@@ -227,6 +230,12 @@ export async function submitForReview(versionId?: string, appId?: string, versio
   md += `| **Build** | ${build.attributes.version} |\n`;
   md += `| **Locales** | ${locs.length} |\n`;
   md += `| **Submission ID** | ${submissionId} |\n`;
+  if (warnings.length > 0) {
+    md += `\n**Warnings:**\n`;
+    for (const w of warnings) {
+      md += `- ${w}\n`;
+    }
+  }
   md += `\n**Status:** Submitted for App Review. Typically takes 24-48 hours.\n`;
   md += `\nUse \`asc_list_versions\` to monitor review progress.`;
 
