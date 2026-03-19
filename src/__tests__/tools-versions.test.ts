@@ -157,4 +157,60 @@ describe('tools/versions', () => {
       expect(result).toContain('de-DE');
     });
   });
+
+  describe('assignBuildToVersion', () => {
+    it('should assign build to version successfully', async () => {
+      global.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({
+          data: { type: 'appStoreVersions', id: 'v1' },
+        }), { status: 200 })
+      );
+
+      const { assignBuildToVersion } = await import('../tools/versions.js');
+      const result = await assignBuildToVersion('v1', 'build-42');
+
+      expect(result).toContain('Build Assigned');
+      expect(result).toContain('build-42');
+      expect(result).toContain('v1');
+      expect(result).toContain('asc_submit_for_review');
+    });
+
+    it('should reject empty versionId', async () => {
+      const { assignBuildToVersion } = await import('../tools/versions.js');
+      await expect(assignBuildToVersion('', 'build-42')).rejects.toThrow('Invalid versionId');
+    });
+
+    it('should reject empty buildId', async () => {
+      const { assignBuildToVersion } = await import('../tools/versions.js');
+      await expect(assignBuildToVersion('v1', '')).rejects.toThrow('Invalid buildId');
+    });
+  });
+
+  describe('updateVersionLocalization', () => {
+    it('should update promotional text for an existing locale', async () => {
+      const mockFetch = vi.fn()
+        // GET existing localizations
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          data: [
+            { id: 'loc-en', attributes: { locale: 'en-US', whatsNew: 'Fixes', description: 'Great app', keywords: 'chat', promotionalText: 'Old promo', marketingUrl: null, supportUrl: null } },
+          ],
+        }), { status: 200 }))
+        // PATCH localization
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          data: { id: 'loc-en', type: 'appStoreVersionLocalizations' },
+        }), { status: 200 }));
+
+      global.fetch = mockFetch;
+
+      const { updateVersionLocalization } = await import('../tools/versions.js');
+      const result = await updateVersionLocalization('v1', 'en-US', {
+        promotionalText: 'New promotional text for the app',
+      });
+
+      expect(result).toContain('Version Localization Updated: en-US');
+      expect(result).toContain('promotionalText');
+      expect(result).toContain('New promotional text');
+      expect(result).toContain('Updated');
+    });
+  });
 });

@@ -264,4 +264,120 @@ describe('tools/review', () => {
       expect(result).toContain('No rejected versions found');
     });
   });
+
+  describe('updateReviewDetail', () => {
+    it('should update existing review detail', async () => {
+      const mockFetch = vi.fn()
+        // GET version with included appStoreReviewDetails
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          data: { id: 'v1', attributes: { versionString: '2.0.0' } },
+          included: [
+            {
+              type: 'appStoreReviewDetails', id: 'rd-1',
+              attributes: {
+                contactFirstName: 'Ali', contactLastName: 'M',
+                contactEmail: 'ali@test.com', contactPhone: '+1234',
+                demoAccountRequired: true, demoAccountName: 'demo', demoAccountPassword: 'pass',
+                notes: 'Old notes',
+              },
+            },
+          ],
+        }), { status: 200 }))
+        // PATCH appStoreReviewDetails
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          data: { id: 'rd-1', type: 'appStoreReviewDetails' },
+        }), { status: 200 }));
+
+      global.fetch = mockFetch;
+
+      const { updateReviewDetail } = await import('../tools/review.js');
+      const result = await updateReviewDetail('v1', {
+        contactFirstName: 'Mehmet',
+        demoAccountPassword: 'newSecret',
+        notes: 'Updated notes',
+      });
+
+      expect(result).toContain('Review Detail Updated');
+      expect(result).toContain('Updated');
+      expect(result).toContain('contactFirstName');
+      expect(result).toContain('Mehmet');
+      // Password must be masked
+      expect(result).toContain('(set)');
+      expect(result).not.toContain('newSecret');
+    });
+
+    it('should create new review detail when none exists', async () => {
+      const mockFetch = vi.fn()
+        // GET version with NO included appStoreReviewDetails
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          data: { id: 'v2', attributes: { versionString: '3.0.0' } },
+          included: [],
+        }), { status: 200 }))
+        // POST appStoreReviewDetails
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          data: { id: 'rd-new', type: 'appStoreReviewDetails' },
+        }), { status: 201 }));
+
+      global.fetch = mockFetch;
+
+      const { updateReviewDetail } = await import('../tools/review.js');
+      const result = await updateReviewDetail('v2', {
+        contactFirstName: 'Ali',
+        contactEmail: 'ali@example.com',
+      });
+
+      expect(result).toContain('Review Detail Updated');
+      expect(result).toContain('Created');
+      expect(result).toContain('contactFirstName');
+      expect(result).toContain('Ali');
+    });
+  });
+
+  describe('withdrawFromReview', () => {
+    it('should withdraw version from WAITING_FOR_REVIEW', async () => {
+      const mockFetch = vi.fn()
+        // GET version info
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          data: {
+            id: 'v1',
+            attributes: { versionString: '2.0.0', appStoreState: 'WAITING_FOR_REVIEW', platform: 'IOS' },
+            relationships: { app: { data: { type: 'apps', id: 'app-1' } } },
+          },
+        }), { status: 200 }))
+        // GET reviewSubmissions
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          data: [
+            { id: 'rs-1', type: 'reviewSubmissions', attributes: { state: 'WAITING_FOR_REVIEW', submittedDate: '2026-03-10T00:00:00Z' } },
+          ],
+        }), { status: 200 }))
+        // PATCH cancel
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          data: { id: 'rs-1', type: 'reviewSubmissions', attributes: { state: 'CANCELLED' } },
+        }), { status: 200 }));
+
+      global.fetch = mockFetch;
+
+      const { withdrawFromReview } = await import('../tools/review.js');
+      const result = await withdrawFromReview('v1');
+
+      expect(result).toContain('Withdrawn from Review');
+      expect(result).toContain('2.0.0');
+      expect(result).toContain('WAITING_FOR_REVIEW');
+      expect(result).toContain('PREPARE_FOR_SUBMISSION');
+    });
+
+    it('should reject when state is READY_FOR_SALE', async () => {
+      global.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({
+          data: {
+            id: 'v1',
+            attributes: { versionString: '2.0.0', appStoreState: 'READY_FOR_SALE', platform: 'IOS' },
+          },
+        }), { status: 200 })
+      );
+
+      const { withdrawFromReview } = await import('../tools/review.js');
+      await expect(withdrawFromReview('v1')).rejects.toThrow('READY_FOR_SALE');
+    });
+  });
 });

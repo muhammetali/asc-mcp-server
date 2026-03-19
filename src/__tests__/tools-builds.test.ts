@@ -94,4 +94,80 @@ describe('tools/builds', () => {
       expect(result).toContain('bg-1');
     });
   });
+
+  describe('setEncryption', () => {
+    it('should indicate no export compliance when set to false', async () => {
+      global.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({
+          data: { id: 'build-1', type: 'builds', attributes: { usesNonExemptEncryption: false } },
+        }), { status: 200 })
+      );
+
+      const { setEncryption } = await import('../tools/builds.js');
+      const result = await setEncryption('build-1', false);
+
+      expect(result).toContain('Encryption Declaration Updated');
+      expect(result).toContain('build-1');
+      expect(result).toContain('false');
+      expect(result).toContain('No export compliance');
+    });
+
+    it('should not mention export compliance when set to true', async () => {
+      global.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({
+          data: { id: 'build-2', type: 'builds', attributes: { usesNonExemptEncryption: true } },
+        }), { status: 200 })
+      );
+
+      const { setEncryption } = await import('../tools/builds.js');
+      const result = await setEncryption('build-2', true);
+
+      expect(result).toContain('Encryption Declaration Updated');
+      expect(result).toContain('true');
+      expect(result).not.toContain('No export compliance');
+    });
+
+    it('should reject empty buildId', async () => {
+      const { setEncryption } = await import('../tools/builds.js');
+      await expect(setEncryption('', false)).rejects.toThrow('Invalid buildId');
+    });
+  });
+
+  describe('getBuildDetails', () => {
+    it('should return build info with version number and processing state', async () => {
+      global.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({
+          data: {
+            id: 'build-42',
+            attributes: {
+              version: '55',
+              processingState: 'VALID',
+              uploadedDate: '2026-03-15T10:00:00Z',
+              expirationDate: '2026-06-15T10:00:00Z',
+              expired: false,
+              minOsVersion: '16.0',
+              usesNonExemptEncryption: false,
+            },
+          },
+          included: [
+            { type: 'betaBuildLocalizations', id: 'bbl-1', attributes: { locale: 'en-US', whatsNew: 'Bug fixes' } },
+          ],
+        }), { status: 200 })
+      );
+
+      const { getBuildDetails } = await import('../tools/builds.js');
+      const result = await getBuildDetails('build-42');
+
+      expect(result).toContain('Build Details: 55');
+      expect(result).toContain('55');
+      expect(result).toContain('[OK]');
+      expect(result).toContain('VALID');
+      expect(result).toContain('16.0');
+      expect(result).toContain('No');
+      expect(result).toContain('build-42');
+      expect(result).toContain("TestFlight What's New");
+      expect(result).toContain('en-US');
+      expect(result).toContain('Bug fixes');
+    });
+  });
 });
