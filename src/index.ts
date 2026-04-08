@@ -52,7 +52,7 @@ import {
 } from './tools/diagnostics.js';
 import {
   getAgeRating, updateAgeRating, manageAppAvailability,
-  uploadReviewAttachment, listCertificates, registerDevice, listDevices,
+  uploadReviewAttachment, listCertificates, revokeCertificate, revokeCertificatesByType, registerDevice, listDevices,
 } from './tools/appManagement.js';
 import {
   submitForBetaReview, getBetaReviewStatus,
@@ -1018,6 +1018,40 @@ server.tool(
   async ({ certificateType }) => {
     try {
       const result = await listCertificates(certificateType);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'asc_revoke_certificate',
+  'Revoke a single signing certificate by its ASC certificate ID. Use when a Mac\'s keychain ACL is corrupted and the local private key is unusable — Apple\'s portal still holds the cert and Xcode refuses to create a new one until you revoke. CAUTION: revoking a Distribution cert in active use breaks new uploads.',
+  {
+    certificateId: z.string().min(1).describe('Certificate ID from asc_list_certificates (e.g. "4Z59G7STQA")'),
+  },
+  async ({ certificateId }) => {
+    try {
+      const result = await revokeCertificate(certificateId);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'asc_revoke_certificates_by_type',
+  'Bulk-revoke ALL certificates of a given type. Distribution types are blocked at the helper level for safety. Default is DEVELOPMENT — the most common "blow it all away and let Xcode rebuild" recovery path when local keychain ACLs are broken.',
+  {
+    certificateType: z.enum([
+      'IOS_DEVELOPMENT', 'MAC_APP_DEVELOPMENT', 'DEVELOPMENT',
+    ]).default('DEVELOPMENT').describe('Type of certificates to revoke (Distribution types are blocked)'),
+  },
+  async ({ certificateType }) => {
+    try {
+      const result = await revokeCertificatesByType(certificateType);
       return { content: [{ type: 'text', text: result }] };
     } catch (e) {
       return { content: [{ type: 'text', text: handleError(e) }], isError: true };

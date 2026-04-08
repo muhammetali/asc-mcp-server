@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from 'fs';
 import { createHash } from 'crypto';
 import { resolve } from 'path';
-import { ascGet, ascPost, ascPatch, ascUploadChunk, type ASCResponse } from '../client.js';
+import { ascGet, ascPost, ascPatch, ascDelete, ascUploadChunk, type ASCResponse } from '../client.js';
 import { RESOURCE_TYPES } from '../constants.js';
 import { validateId } from '../validation.js';
 
@@ -390,6 +390,112 @@ export async function listCertificates(certificateType?: string): Promise<string
     md += `\n> **WARNING:** ${expiringCount} certificate(s) expiring within 30 days. Renew them to avoid disruption.\n`;
   }
 
+  return md;
+}
+
+/**
+ * Revoke (delete) a single certificate by its ASC certificate ID.
+ *
+ * Use case: when a Mac's keychain ACL gets corrupted and the local
+ * private key for an Apple Development cert becomes unusable
+ * (errSecInternalComponent on every codesign), Apple's portal still
+ * holds the cert. Xcode refuses to create a new one until the broken
+ * one is revoked. This tool unblocks the situation without GUI access.
+ *
+ * IMPORTANT: revoking a Distribution certificate that is in active use
+ * by App Store / TestFlight builds will break new uploads until a new
+ * one is created and embedded in the next archive. Be cautious.
+ */
+export async function revokeCertificate(certificateId: string): Promise<string> {
+  if (!certificateId || typeof certificateId !== 'string') {
+    throw new Error('certificateId is required and must be a string');
+  }
+  await ascDelete(`/v1/certificates/${certificateId}`);
+  return `## Certificate Revoked\n\n` +
+    `| Field | Value |\n` +
+    `|-------|-------|\n` +
+    `| **Certificate ID** | \`${certificateId}\` |\n` +
+    `| **Status** | Revoked |\n\n` +
+    `> The certificate has been removed from App Store Connect. Any local ` +
+    `private key remains in your keychain and should be deleted manually if ` +
+    `you no longer need it. Xcode will create a new certificate on the next ` +
+    `signed build (with \`-allowProvisioningUpdates\`).\n`;
+}
+
+/**
+ * Revoke ALL certificates of a given type (or all DEVELOPMENT certs by default).
+ *
+ * Convenience wrapper for the common "my dev cert is broken, blow them
+ * all away and let Xcode rebuild" workflow. Aggregates per-cert failures
+ * into a single result so a partial failure doesn't lose information.
+ *
+ * SAFETY: pass an explicit certificateType to avoid accidentally revoking
+ * Distribution certs. The default ('DEVELOPMENT') matches both
+ * IOS_DEVELOPMENT and DEVELOPMENT type strings returned by the ASC API.
+ */
+export async function revokeCertificatesByType(
+  certificateType: string = 'DEVELOPMENT',
+): Promise<string> {
+  // Distribution types are blocked at the helper level — callers can still
+  // call revokeCertificate() one at a time if they really need to revoke a
+  // distribution cert, but the bulk helper refuses by design.
+  const blocked = new Set([
+    'IOS_DISTRIBUTION', 'DISTRIBUTION', 'MAC_APP_DISTRIBUTION',
+    'MAC_INSTALLER_DISTRIBUTION', 'DEVELOPER_ID_APPLICATION', 'DEVELOPER_ID_KEXT',
+  ]);
+  if (blocked.has(certificateType.toUpperCase())) {
+    throw new Error(
+      `Refusing bulk revoke for type "${certificateType}". ` +
+      `Distribution certs may be in active use; revoke individually with ` +
+      `revokeCertificate() if you really mean it.`,
+    );
+  }
+
+  const params: Record<string, string> = {
+    'fields[certificates]': 'displayName,certificateType,serialNumber',
+    'limit': '200',
+  };
+  // ASC accepts the type filter as-is; both DEVELOPMENT and IOS_DEVELOPMENT
+  // are valid type strings depending on how the cert was created.
+  if (certificateType) {
+    params['filter[certificateType]'] = certificateType;
+  }
+
+  const list = await ascGet<ASCResponse>('/v1/certificates', params);
+  const certs = list.data || [];
+
+  if (certs.length === 0) {
+    return `## Bulk Revoke\n\nNo certificates of type \`${certificateType}\` found. Nothing to do.\n`;
+  }
+
+  let md = `## Bulk Revoke (${certificateType})\n\n`;
+  md += `Found **${certs.length}** certificate(s) to revoke.\n\n`;
+  md += `| Status | Name | Serial | ID |\n`;
+  md += `|--------|------|--------|----|\n`;
+
+  let revoked = 0;
+  let failed = 0;
+  for (const cert of certs) {
+    const a = cert.attributes || {};
+    const name = a.displayName || '-';
+    const serial = a.serialNumber || '-';
+    const id = cert.id;
+    try {
+      await ascDelete(`/v1/certificates/${id}`);
+      revoked++;
+      md += `| OK | ${name} | \`${serial}\` | \`${id}\` |\n`;
+    } catch (err) {
+      failed++;
+      const msg = err instanceof Error ? err.message : String(err);
+      md += `| FAILED | ${name} | \`${serial}\` | \`${id}\` (${msg}) |\n`;
+    }
+  }
+
+  md += `\n**Summary:** ${revoked} revoked, ${failed} failed.\n`;
+  if (revoked > 0) {
+    md += `\n> Run \`xcodebuild ... -allowProvisioningUpdates -authenticationKey*\` ` +
+      `next — Xcode will create fresh certificates via the ASC API.\n`;
+  }
   return md;
 }
 
