@@ -1346,16 +1346,6 @@ async function startHttpTransport(): Promise<() => Promise<void>> {
     process.env.MCP_PUBLIC_URL ?? `http://${host}:${port}`,
   );
 
-  // Stateless mode (sessionIdGenerator: undefined) — every request is
-  // self-contained, no session-id round-trip required. claude.ai cloud
-  // workers and MCP Inspector both work fine in stateless mode and it
-  // sidesteps the 400-on-first-call issue we hit when the client skips
-  // the explicit initialize handshake.
-  const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: undefined,
-  });
-  await server.connect(transport);
-
   const oauthProvider = new InMemoryOAuthProvider();
   // Periodic prune of expired auth codes / access tokens (in-memory).
   const pruneTimer = setInterval(() => oauthProvider.pruneExpired(), 5 * 60 * 1000);
@@ -1391,10 +1381,25 @@ async function startHttpTransport(): Promise<() => Promise<void>> {
 
   // Bearer-protected MCP endpoint. The SDK middleware validates the
   // access token against our provider before forwarding to the transport.
+  //
+  // Per-request transport pattern (stateless): create a fresh transport
+  // and a fresh McpServer connection on every request. This is the
+  // pattern recommended by the official SDK examples for stateless
+  // mode — a single shared transport instance gets confused after the
+  // first call because the JSON-RPC reader closes its stream when the
+  // first response writes. Build/connect/handle/close per-request.
   const requireAuth = requireBearerAuth({ verifier: oauthProvider });
+  app.use(express.json({ limit: '25mb' }));
   app.all('/mcp', requireAuth, async (req, res) => {
+    const t = new StreamableHTTPServerTransport({
+      sessionIdGenerator: undefined, // stateless
+    });
+    res.on('close', () => {
+      t.close().catch(() => undefined);
+    });
     try {
-      await transport.handleRequest(req, res);
+      await server.connect(t);
+      await t.handleRequest(req, res, req.body);
     } catch (err) {
       console.error('[asc-mcp] handleRequest error:', err);
       if (!res.headersSent) {
@@ -1415,7 +1420,8 @@ async function startHttpTransport(): Promise<() => Promise<void>> {
 
   return async () => {
     clearInterval(pruneTimer);
-    await transport.close();
+    // Per-request transports clean themselves up via res.on('close', ...).
+    // Nothing to close at the server level here.
   };
 }
 
