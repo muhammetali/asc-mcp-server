@@ -2,13 +2,16 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { createServer as createHttpServer, IncomingMessage, ServerResponse } from 'node:http';
-import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { mcpAuthRouter } from '@modelcontextprotocol/sdk/server/auth/router.js';
+import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js';
+import express from 'express';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { config } from 'dotenv';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { PROJECT_LOCALES } from './constants.js';
+import { InMemoryOAuthProvider } from './oauth-provider.js';
 
 // Load .env from the package directory
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -1334,66 +1337,75 @@ server.tool(
 // START SERVER
 // =============================================================================
 
-// Bearer token comparison resistant to timing attacks. Returns true only
-// if the request token matches MCP_BEARER_TOKEN exactly. Constant-time
-// equality avoids leaking token length or prefix via response timing.
-function checkBearerToken(req: IncomingMessage): boolean {
-  const required = process.env.MCP_BEARER_TOKEN;
-  if (!required) return false;
-  const header = req.headers.authorization;
-  if (!header || !header.startsWith('Bearer ')) return false;
-  const provided = header.slice(7);
-  const requiredBuf = Buffer.from(required);
-  const providedBuf = Buffer.from(provided);
-  if (requiredBuf.length !== providedBuf.length) return false;
-  return timingSafeEqual(requiredBuf, providedBuf);
-}
-
 async function startHttpTransport(): Promise<() => Promise<void>> {
   const port = parseInt(process.env.MCP_HTTP_PORT ?? '8088', 10);
   const host = process.env.MCP_HTTP_HOST ?? '127.0.0.1';
-  if (!process.env.MCP_BEARER_TOKEN) {
-    throw new Error('MCP_BEARER_TOKEN env var is required for HTTP transport');
-  }
+  // Public-facing base URL (https://asc-mcp.example.com), used in OAuth
+  // metadata so claude.ai can build absolute /authorize, /token URLs.
+  const issuerUrl = new URL(
+    process.env.MCP_PUBLIC_URL ?? `http://${host}:${port}`,
+  );
 
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: () => randomUUID(),
   });
   await server.connect(transport);
 
-  const httpServer = createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
-    // Liveness probe — no auth, used by nginx/PM2/health monitor.
-    if (req.method === 'GET' && req.url === '/health') {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'healthy', server: 'asc-mcp', version: '1.0.0' }));
-      return;
-    }
-    // All other paths require Bearer auth.
-    if (!checkBearerToken(req)) {
-      res.writeHead(401, { 'Content-Type': 'application/json', 'WWW-Authenticate': 'Bearer' });
-      res.end(JSON.stringify({ error: 'unauthorized' }));
-      return;
-    }
+  const oauthProvider = new InMemoryOAuthProvider();
+  // Periodic prune of expired auth codes / access tokens (in-memory).
+  const pruneTimer = setInterval(() => oauthProvider.pruneExpired(), 5 * 60 * 1000);
+  pruneTimer.unref();
+
+  const app = express();
+  app.disable('x-powered-by');
+
+  // Liveness probe — no auth, used by nginx / PM2 / uptime monitors.
+  app.get('/health', (_req, res) => {
+    res.json({ status: 'healthy', server: 'asc-mcp', version: '1.0.0' });
+  });
+
+  // Mount OAuth 2.1 authorization server endpoints:
+  //   GET  /.well-known/oauth-authorization-server
+  //   POST /register   (Dynamic Client Registration, RFC 7591)
+  //   GET  /authorize
+  //   POST /token
+  //   POST /revoke
+  app.use(
+    mcpAuthRouter({
+      provider: oauthProvider,
+      issuerUrl,
+      // Resource server URL == this MCP server's public URL (AS=RS model).
+      resourceServerUrl: issuerUrl,
+      resourceName: 'asc-mcp',
+    }),
+  );
+
+  // Bearer-protected MCP endpoint. The SDK middleware validates the
+  // access token against our provider before forwarding to the transport.
+  const requireAuth = requireBearerAuth({ verifier: oauthProvider });
+  app.all('/mcp', requireAuth, async (req, res) => {
     try {
       await transport.handleRequest(req, res);
     } catch (err) {
       console.error('[asc-mcp] handleRequest error:', err);
       if (!res.headersSent) {
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'internal' }));
+        res.status(500).json({ error: 'internal' });
       }
     }
   });
 
   await new Promise<void>((resolveListen) => {
-    httpServer.listen(port, host, () => {
-      console.error(`ASC MCP Server listening on http://${host}:${port} (Streamable HTTP)`);
+    app.listen(port, host, () => {
+      console.error(
+        `ASC MCP Server listening on http://${host}:${port} (Streamable HTTP + OAuth 2.1)`,
+      );
+      console.error(`Public issuer URL: ${issuerUrl.toString()}`);
       resolveListen();
     });
   });
 
   return async () => {
-    await new Promise<void>((res) => httpServer.close(() => res()));
+    clearInterval(pruneTimer);
     await transport.close();
   };
 }
