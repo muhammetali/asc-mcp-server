@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { createServer as createHttpServer, IncomingMessage, ServerResponse } from 'node:http';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { config } from 'dotenv';
 import { resolve, dirname } from 'path';
@@ -1331,14 +1334,86 @@ server.tool(
 // START SERVER
 // =============================================================================
 
-async function main() {
-  const transport = new StdioServerTransport();
+// Bearer token comparison resistant to timing attacks. Returns true only
+// if the request token matches MCP_BEARER_TOKEN exactly. Constant-time
+// equality avoids leaking token length or prefix via response timing.
+function checkBearerToken(req: IncomingMessage): boolean {
+  const required = process.env.MCP_BEARER_TOKEN;
+  if (!required) return false;
+  const header = req.headers.authorization;
+  if (!header || !header.startsWith('Bearer ')) return false;
+  const provided = header.slice(7);
+  const requiredBuf = Buffer.from(required);
+  const providedBuf = Buffer.from(provided);
+  if (requiredBuf.length !== providedBuf.length) return false;
+  return timingSafeEqual(requiredBuf, providedBuf);
+}
+
+async function startHttpTransport(): Promise<() => Promise<void>> {
+  const port = parseInt(process.env.MCP_HTTP_PORT ?? '8088', 10);
+  const host = process.env.MCP_HTTP_HOST ?? '127.0.0.1';
+  if (!process.env.MCP_BEARER_TOKEN) {
+    throw new Error('MCP_BEARER_TOKEN env var is required for HTTP transport');
+  }
+
+  const transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: () => randomUUID(),
+  });
   await server.connect(transport);
-  console.error('ASC MCP Server running on stdio');
+
+  const httpServer = createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
+    // Liveness probe — no auth, used by nginx/PM2/health monitor.
+    if (req.method === 'GET' && req.url === '/health') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status: 'healthy', server: 'asc-mcp', version: '1.0.0' }));
+      return;
+    }
+    // All other paths require Bearer auth.
+    if (!checkBearerToken(req)) {
+      res.writeHead(401, { 'Content-Type': 'application/json', 'WWW-Authenticate': 'Bearer' });
+      res.end(JSON.stringify({ error: 'unauthorized' }));
+      return;
+    }
+    try {
+      await transport.handleRequest(req, res);
+    } catch (err) {
+      console.error('[asc-mcp] handleRequest error:', err);
+      if (!res.headersSent) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'internal' }));
+      }
+    }
+  });
+
+  await new Promise<void>((resolveListen) => {
+    httpServer.listen(port, host, () => {
+      console.error(`ASC MCP Server listening on http://${host}:${port} (Streamable HTTP)`);
+      resolveListen();
+    });
+  });
+
+  return async () => {
+    await new Promise<void>((res) => httpServer.close(() => res()));
+    await transport.close();
+  };
+}
+
+async function main() {
+  const mode = process.env.MCP_TRANSPORT === 'http' ? 'http' : 'stdio';
+  let stopHttp: (() => Promise<void>) | null = null;
+
+  if (mode === 'http') {
+    stopHttp = await startHttpTransport();
+  } else {
+    const transport = new StdioServerTransport();
+    await server.connect(transport);
+    console.error('ASC MCP Server running on stdio');
+  }
 
   // Graceful shutdown
   const shutdown = async () => {
     console.error('ASC MCP Server shutting down...');
+    if (stopHttp) await stopHttp();
     await server.close();
     process.exit(0);
   };
