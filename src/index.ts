@@ -1346,8 +1346,13 @@ async function startHttpTransport(): Promise<() => Promise<void>> {
     process.env.MCP_PUBLIC_URL ?? `http://${host}:${port}`,
   );
 
+  // Stateless mode (sessionIdGenerator: undefined) — every request is
+  // self-contained, no session-id round-trip required. claude.ai cloud
+  // workers and MCP Inspector both work fine in stateless mode and it
+  // sidesteps the 400-on-first-call issue we hit when the client skips
+  // the explicit initialize handshake.
   const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: () => randomUUID(),
+    sessionIdGenerator: undefined,
   });
   await server.connect(transport);
 
@@ -1358,6 +1363,10 @@ async function startHttpTransport(): Promise<() => Promise<void>> {
 
   const app = express();
   app.disable('x-powered-by');
+  // Behind nginx (single hop) — trust X-Forwarded-* so SDK's rate-limit
+  // middleware sees real client IP and OAuth absolute URLs come out as
+  // https://, not http://.
+  app.set('trust proxy', 1);
 
   // Liveness probe — no auth, used by nginx / PM2 / uptime monitors.
   app.get('/health', (_req, res) => {
