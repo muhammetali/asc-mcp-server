@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from 'fs';
 import { createHash } from 'crypto';
 import { resolve } from 'path';
-import { ascGet, ascPost, ascPatch, ascDelete, ascUploadChunk, type ASCResponse } from '../client.js';
+import { ascGet, ascGetAll, ascPost, ascPatch, ascDelete, ascUploadChunk, type ASCResponse } from '../client.js';
 import { RESOURCE_TYPES } from '../constants.js';
 import { validateId } from '../validation.js';
 
@@ -124,6 +124,94 @@ export async function updateAgeRating(
   return md;
 }
 
+// App territory availability — v2 API, a completely different shape from
+// the v1 code this replaced. Verified against Apple's official OpenAPI
+// spec 2026-08-12 (developer.apple.com/sample-code/app-store-connect/
+// app-store-connect-openapi-specification.zip) after the old v1 code
+// (`GET /v1/apps/{id}/availableTerritories`, a flat territory-ID list
+// relationship on `apps`) turned out not to exist anywhere in the current
+// API — every call would have failed. There is no flat "available
+// territories" list on an app anymore:
+//   1. `GET /v1/apps/{id}/appAvailabilityV2` — the app has ONE
+//      appAvailability resource; fetch its ID first.
+//   2. `GET /v2/appAvailabilities/{id}/territoryAvailabilities` — paginated
+//      list of per-territory records, each with its own `available`
+//      boolean (not "in the list = available", an explicit flag now).
+//   3. Writes (`POST /v2/appAvailabilities`) are a JSON:API *compound
+//      document*: you don't reference existing `territories` directly —
+//      you create new `territoryAvailabilities` records inline via
+//      `included`, referenced by client-chosen local IDs from
+//      `data.relationships.territoryAvailabilities.data`. This submits the
+//      FULL desired state (every territory's `available` flag), same
+//      "replace the whole set" semantics the old code had — just a
+//      different wire format for it.
+// Exported so appAvailability.ts's getAppPricing() can reuse the same
+// (correct, v2) territory lookup instead of duplicating it — it had its own
+// copy of the identical `/v1/apps/{id}/availableTerritories` bug, silently
+// swallowed by a try/catch ("Could not fetch territory data" every time).
+export async function getAppAvailabilityId(appId: string): Promise<string> {
+  const result = await ascGet<ASCResponse>(`/v1/apps/${appId}/appAvailabilityV2`, {});
+  if (!result.data) {
+    throw new Error(`No app availability resource found for app ${appId}. The app may not be fully set up yet.`);
+  }
+  return result.data.id;
+}
+
+export interface TerritoryAvailabilityState {
+  territoryCode: string;
+  available: boolean;
+}
+
+export async function listTerritoryAvailabilities(availabilityId: string): Promise<TerritoryAvailabilityState[]> {
+  // `include=territory` is required for Apple to populate the
+  // `relationships.territory.data.id` linkage at all — confirmed live
+  // 2026-08-12: requesting `fields[territoryAvailabilities]=available,
+  // territory` alone returned `available` correctly but every
+  // `relationships.territory` was entirely absent (not even a stub
+  // resource-identifier), unlike stricter JSON:API implementations where
+  // relationship linkage is independent of `include`.
+  const items = await ascGetAll<any>(`/v2/appAvailabilities/${availabilityId}/territoryAvailabilities`, {
+    'fields[territoryAvailabilities]': 'available,territory',
+    'include': 'territory',
+    'limit': '200',
+  });
+  return items.map((t: any) => ({
+    territoryCode: t.relationships?.territory?.data?.id,
+    // `available` is nullable in Apple's schema; treat null/undefined as
+    // available (matches "no explicit restriction" being the common case).
+    available: t.attributes?.available !== false,
+  }));
+}
+
+async function submitTerritoryAvailabilities(
+  appId: string,
+  entries: TerritoryAvailabilityState[],
+  availableInNewTerritories: boolean,
+): Promise<void> {
+  const included = entries.map((e, i) => ({
+    type: 'territoryAvailabilities',
+    id: `local-${i}`,
+    attributes: { available: e.available },
+    relationships: {
+      territory: { data: { type: 'territories', id: e.territoryCode } },
+    },
+  }));
+
+  await ascPost<ASCResponse>('/v2/appAvailabilities', {
+    data: {
+      type: 'appAvailabilities',
+      attributes: { availableInNewTerritories },
+      relationships: {
+        app: { data: { type: 'apps', id: appId } },
+        territoryAvailabilities: {
+          data: included.map((inc) => ({ type: 'territoryAvailabilities', id: inc.id })),
+        },
+      },
+    },
+    included,
+  });
+}
+
 export async function manageAppAvailability(
   appId: string,
   action: 'get' | 'remove_from_sale' | 'restore',
@@ -131,111 +219,72 @@ export async function manageAppAvailability(
 ): Promise<string> {
   validateId(appId, 'appId');
 
-  if (action === 'get') {
-    const result = await ascGet<ASCResponse>(`/v1/apps/${appId}/availableTerritories`, {
-      'limit': '200',
-    });
+  const availabilityId = await getAppAvailabilityId(appId);
 
-    if (!result.data || result.data.length === 0) {
-      return `## App Availability\n\nNo available territories found for app \`${appId}\`.`;
+  if (action === 'get') {
+    const territories = await listTerritoryAvailabilities(availabilityId);
+
+    if (territories.length === 0) {
+      return `## App Availability\n\nNo territory availability data found for app \`${appId}\`.`;
     }
 
-    const territories = result.data;
     let md = `## App Availability (${territories.length} territories)\n\n`;
-    md += `| Territory Code |\n`;
-    md += `|----------------|\n`;
+    md += `| Territory Code | Available |\n`;
+    md += `|----------------|-----------|\n`;
     for (const t of territories) {
-      md += `| ${t.id} |\n`;
+      md += `| ${t.territoryCode} | ${t.available ? 'Yes' : 'No'} |\n`;
     }
 
     return md;
   }
 
   if (action === 'remove_from_sale') {
-    // First get current territories
-    const currentResult = await ascGet<ASCResponse>(`/v1/apps/${appId}/availableTerritories`, {
-      'limit': '200',
-    });
-
-    const currentTerritories = currentResult.data || [];
     const codesToRemove = territoryCodes || [];
-
     if (codesToRemove.length === 0) {
       throw new Error('territoryCodes is required for remove_from_sale action. Provide the territory codes to remove.');
     }
 
-    // Build territory relationships excluding the given codes
-    const remainingTerritories = currentTerritories
-      .filter((t: any) => !codesToRemove.includes(t.id))
-      .map((t: any) => ({ type: 'territories', id: t.id }));
+    const current = await listTerritoryAvailabilities(availabilityId);
+    const removeSet = new Set(codesToRemove);
+    // Full-state replace: keep every territory's current flag, flip only
+    // the ones targeted for removal — never silently touch territories the
+    // caller didn't mention.
+    const updated = current.map((t) => ({
+      territoryCode: t.territoryCode,
+      available: removeSet.has(t.territoryCode) ? false : t.available,
+    }));
 
-    await ascPost<ASCResponse>('/v2/appAvailabilities', {
-      data: {
-        type: 'appAvailabilities',
-        attributes: {
-          availableInNewTerritories: false,
-        },
-        relationships: {
-          app: {
-            data: { type: 'apps', id: appId },
-          },
-          availableTerritories: {
-            data: remainingTerritories,
-          },
-        },
-      },
-    });
+    await submitTerritoryAvailabilities(appId, updated, false);
 
+    const stillAvailable = updated.filter((t) => t.available).length;
     let md = `## App Availability Updated (Remove from Sale)\n\n`;
     md += `| Field | Value |\n`;
     md += `|-------|-------|\n`;
     md += `| **Removed Territories** | ${codesToRemove.join(', ')} |\n`;
-    md += `| **Remaining Territories** | ${remainingTerritories.length} |\n`;
+    md += `| **Still Available** | ${stillAvailable} of ${updated.length} |\n`;
     md += `\n**Status:** Territories removed successfully.`;
 
     return md;
   }
 
   if (action === 'restore') {
-    // Get all territories and include them all
-    const currentResult = await ascGet<ASCResponse>(`/v1/apps/${appId}/availableTerritories`, {
-      'limit': '200',
-    });
+    const current = await listTerritoryAvailabilities(availabilityId);
+    // No codes given => restore everything; codes given => restore only
+    // those, leaving every other territory's current flag untouched.
+    const restoreSet = territoryCodes && territoryCodes.length > 0 ? new Set(territoryCodes) : null;
+    const updated = current.map((t) => ({
+      territoryCode: t.territoryCode,
+      available: restoreSet ? (restoreSet.has(t.territoryCode) ? true : t.available) : true,
+    }));
 
-    const currentTerritories = currentResult.data || [];
-    const allTerritories = currentTerritories.map((t: any) => ({ type: 'territories', id: t.id }));
+    await submitTerritoryAvailabilities(appId, updated, true);
 
-    // If specific territory codes provided, add those too
-    if (territoryCodes && territoryCodes.length > 0) {
-      const existingIds = new Set(allTerritories.map((t: any) => t.id));
-      for (const code of territoryCodes) {
-        if (!existingIds.has(code)) {
-          allTerritories.push({ type: 'territories', id: code });
-        }
-      }
-    }
-
-    await ascPost<ASCResponse>('/v2/appAvailabilities', {
-      data: {
-        type: 'appAvailabilities',
-        attributes: {
-          availableInNewTerritories: true,
-        },
-        relationships: {
-          app: {
-            data: { type: 'apps', id: appId },
-          },
-          availableTerritories: {
-            data: allTerritories,
-          },
-        },
-      },
-    });
-
+    const nowAvailable = updated.filter((t) => t.available).length;
     let md = `## App Availability Restored\n\n`;
     md += `| Field | Value |\n`;
     md += `|-------|-------|\n`;
-    md += `| **Total Territories** | ${allTerritories.length} |\n`;
+    md += `| **Total Territories** | ${updated.length} |\n`;
+    md += `| **Now Available** | ${nowAvailable} |\n`;
     md += `| **Available in New Territories** | Yes |\n`;
     md += `\n**Status:** App availability restored successfully.`;
 

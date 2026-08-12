@@ -29,12 +29,19 @@ export async function listSandboxTesters(): Promise<string> {
 export async function clearSandboxTesterHistory(testerId: string): Promise<string> {
   validateId(testerId, 'testerId');
 
-  await ascPost('/v1/sandboxTestersClearPurchaseHistoryRequests', {
+  // Apple's real resource is v2 + SINGULAR ("Request", not "Requests") —
+  // both the path and the `type` string. Verified against Apple's official
+  // OpenAPI spec (SandboxTestersClearPurchaseHistoryRequestV2CreateRequest)
+  // after the old v1-plural version 404'd/400'd live. The relationship is
+  // also plural (`sandboxTesters`, an array) even though this function only
+  // ever clears one — Apple's create request supports batching, we just
+  // don't expose that from this single-tester tool.
+  await ascPost('/v2/sandboxTestersClearPurchaseHistoryRequest', {
     data: {
-      type: 'sandboxTestersClearPurchaseHistoryRequests',
+      type: 'sandboxTestersClearPurchaseHistoryRequest',
       relationships: {
-        sandboxTester: {
-          data: { type: 'sandboxTesters', id: testerId },
+        sandboxTesters: {
+          data: [{ type: 'sandboxTesters', id: testerId }],
         },
       },
     },

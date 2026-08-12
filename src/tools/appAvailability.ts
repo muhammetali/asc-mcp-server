@@ -1,5 +1,6 @@
 import { ascGet, ascPatch, ascPost, type ASCResponse } from '../client.js';
 import { validateId } from '../validation.js';
+import { getAppAvailabilityId, listTerritoryAvailabilities } from './appManagement.js';
 
 export async function listInAppPurchases(appId: string): Promise<string> {
   validateId(appId, 'appId');
@@ -90,11 +91,18 @@ export async function listSubscriptionGroups(appId: string): Promise<string> {
 export async function getAppPricing(appId: string): Promise<string> {
   validateId(appId, 'appId');
 
-  // Get app price schedule
+  // Get app price schedule. `appPricePoints` is NOT a fields-selectable
+  // relation of this resource — Apple moved actual price-point values
+  // (currency, customer price) to the separate `/v3/appPricePoints/{id}`
+  // resource. Requesting `fields[appPricePoints]` here 400s with
+  // "not a valid type name" (confirmed live 2026-08-12) — verified against
+  // Apple's official OpenAPI spec (fields[] enum for this endpoint is only
+  // appPriceSchedules/apps/territories/appPrices). This function only ever
+  // rendered startDate/endDate/Price ID below, never an actual price value,
+  // so removing the invalid param doesn't drop anything from the output.
   const result = await ascGet<ASCResponse>(`/v1/apps/${appId}/appPriceSchedule`, {
     'include': 'manualPrices,automaticPrices',
     'fields[appPrices]': 'startDate,endDate',
-    'fields[appPricePoints]': 'customerPrice,proceeds,priceTier',
   });
 
   let md = `## App Pricing: \`${appId}\`\n\n`;
@@ -112,15 +120,19 @@ export async function getAppPricing(appId: string): Promise<string> {
     }
   }
 
-  // Also try to get territories
+  // Also try to get territories. `/v1/apps/{id}/availableTerritories` (the
+  // old call here) doesn't exist anywhere in Apple's current API — this was
+  // ALWAYS hitting the catch block below and silently printing "Could not
+  // fetch territory data" for every app, every time. Reuses the same v2
+  // (appAvailabilityV2 -> territoryAvailabilities) lookup as
+  // manageAppAvailability, since it's the same underlying resource.
   try {
-    const territories = await ascGet<ASCResponse>(`/v1/apps/${appId}/availableTerritories`, {
-      'limit': '200',
-    });
+    const availabilityId = await getAppAvailabilityId(appId);
+    const territories = await listTerritoryAvailabilities(availabilityId);
 
-    if (territories.data && territories.data.length > 0) {
-      md += `\n### Available Territories (${territories.data.length})\n\n`;
-      const codes = territories.data.map((t: any) => t.id).sort();
+    const codes = territories.filter((t) => t.available).map((t) => t.territoryCode).sort();
+    if (codes.length > 0) {
+      md += `\n### Available Territories (${codes.length})\n\n`;
       md += codes.join(', ') + '\n';
     }
   } catch {
