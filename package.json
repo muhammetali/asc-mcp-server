@@ -1,7 +1,7 @@
 {
   "name": "asc-mcp-server",
   "version": "1.0.0",
-  "description": "App Store Connect MCP Server - GoyGoyChat project",
+  "description": "App Store Connect MCP Server for AI coding agents",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {

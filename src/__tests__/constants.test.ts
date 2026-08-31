@@ -6,7 +6,7 @@ describe('constants', () => {
     expect(PROJECT_LOCALES).toHaveLength(7);
   });
 
-  it('should include all GoyGoyChat locales', () => {
+  it('should include all MyApp locales', () => {
     expect(PROJECT_LOCALES).toContain('en-US');
     expect(PROJECT_LOCALES).toContain('tr');
     expect(PROJECT_LOCALES).toContain('de-DE');

@@ -250,7 +250,7 @@ describe('tools/review', () => {
       expect(result).toContain('4.3 Spam');
       expect(result).toContain('5.1.1 Privacy');
       // Should NOT contain hardcoded app name
-      expect(result).not.toContain('GoyGoyChat');
+      expect(result).not.toContain('MyApp');
     });
 
     it('should handle no rejections gracefully', async () => {

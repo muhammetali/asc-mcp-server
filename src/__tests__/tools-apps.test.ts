@@ -23,7 +23,7 @@ describe('tools/apps', () => {
       global.fetch = vi.fn().mockResolvedValue(
         new Response(JSON.stringify({
           data: [
-            { id: 'app-1', attributes: { name: 'GoyGoyChat', bundleId: 'com.fixmob.goygoy', sku: 'GOYGOY', primaryLocale: 'en-US' } },
+            { id: 'app-1', attributes: { name: 'MyApp', bundleId: 'com.example.myapp', sku: 'GOYGOY', primaryLocale: 'en-US' } },
             { id: 'app-2', attributes: { name: 'TestApp', bundleId: 'com.test.app', sku: null, primaryLocale: 'tr' } },
           ],
         }), { status: 200 })
@@ -33,8 +33,8 @@ describe('tools/apps', () => {
       const result = await listApps();
 
       expect(result).toContain('## App Store Connect - Apps');
-      expect(result).toContain('GoyGoyChat');
-      expect(result).toContain('com.fixmob.goygoy');
+      expect(result).toContain('MyApp');
+      expect(result).toContain('com.example.myapp');
       expect(result).toContain('app-1');
       expect(result).toContain('TestApp');
       expect(result).toContain('**Total:** 2 app(s)');
@@ -60,7 +60,7 @@ describe('tools/apps', () => {
         if (callCount === 1) {
           // App response
           return Promise.resolve(new Response(JSON.stringify({
-            data: { id: 'app-1', attributes: { name: 'GoyGoyChat', bundleId: 'com.fixmob.goygoy', sku: 'GG', primaryLocale: 'en-US', isOrEverWasMadeForKids: false, contentRightsDeclaration: null } },
+            data: { id: 'app-1', attributes: { name: 'MyApp', bundleId: 'com.example.myapp', sku: 'GG', primaryLocale: 'en-US', isOrEverWasMadeForKids: false, contentRightsDeclaration: null } },
             included: [],
           }), { status: 200 }));
         }
@@ -68,8 +68,8 @@ describe('tools/apps', () => {
         return Promise.resolve(new Response(JSON.stringify({
           data: [{ id: 'info-1', attributes: { appStoreState: 'READY_FOR_SALE', appStoreAgeRating: 'SEVENTEEN_PLUS' } }],
           included: [
-            { type: 'appInfoLocalizations', id: 'loc-1', attributes: { locale: 'en-US', name: 'GoyGoyChat', subtitle: 'Voice Chat', privacyPolicyUrl: 'https://example.com/privacy', privacyChoicesUrl: null } },
-            { type: 'appInfoLocalizations', id: 'loc-2', attributes: { locale: 'tr', name: 'GoyGoyChat', subtitle: null, privacyPolicyUrl: null, privacyChoicesUrl: null } },
+            { type: 'appInfoLocalizations', id: 'loc-1', attributes: { locale: 'en-US', name: 'MyApp', subtitle: 'Voice Chat', privacyPolicyUrl: 'https://example.com/privacy', privacyChoicesUrl: null } },
+            { type: 'appInfoLocalizations', id: 'loc-2', attributes: { locale: 'tr', name: 'MyApp', subtitle: null, privacyPolicyUrl: null, privacyChoicesUrl: null } },
           ],
         }), { status: 200 }));
       });
@@ -77,8 +77,8 @@ describe('tools/apps', () => {
       const { getAppInfo } = await import('../tools/apps.js');
       const result = await getAppInfo('app-1');
 
-      expect(result).toContain('## App Info: GoyGoyChat');
-      expect(result).toContain('com.fixmob.goygoy');
+      expect(result).toContain('## App Info: MyApp');
+      expect(result).toContain('com.example.myapp');
       // Should warn about missing privacy policy for 'tr'
       expect(result).toContain('CRITICAL');
       expect(result).toContain('Privacy Policy URL missing');
