@@ -6,13 +6,13 @@ export async function getTestFlightFeedback(appId: string): Promise<string> {
 
   // Fetch screenshot submissions (which contain general text feedback + optional screenshots)
   const screenshotResult = await ascGet<ASCResponse>(
-    `/v1/betaFeedbackScreenshotSubmissions?filter[build.app]=${appId}&include=tester,build`,
+    `/v1/apps/${appId}/betaFeedbackScreenshotSubmissions?include=tester,build`,
     {}
   ).catch((e: any) => ({ data: [], included: [], error: e.message }));
 
   // Fetch crash submissions (which contain crash info + tester comments)
   const crashResult = await ascGet<ASCResponse>(
-    `/v1/betaFeedbackCrashSubmissions?filter[build.app]=${appId}&include=tester,build`,
+    `/v1/apps/${appId}/betaFeedbackCrashSubmissions?include=tester,build`,
     {}
   ).catch((e: any) => ({ data: [], included: [], error: e.message }));
 
