@@ -49,6 +49,7 @@ import {
   listBetaTesters, addBetaTester, removeBetaTester,
   createBetaGroup, deleteBetaGroup,
 } from './tools/betaTesters.js';
+import { getTestFlightFeedback } from './tools/betaFeedback.js';
 import {
   listInAppPurchases, listSubscriptionGroups, getAppPricing,
 } from './tools/appAvailability.js';
@@ -130,6 +131,20 @@ server.tool(
   async () => {
     try {
       const result = await listApps();
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'asc_get_testflight_feedback',
+  'Get user feedback and crash reports submitted by TestFlight beta testers. Very useful for debugging before release.',
+  { appId: z.string().describe('App ID (from asc_list_apps)') },
+  async ({ appId }) => {
+    try {
+      const result = await getTestFlightFeedback(appId);
       return { content: [{ type: 'text', text: result }] };
     } catch (e) {
       return { content: [{ type: 'text', text: handleError(e) }], isError: true };
