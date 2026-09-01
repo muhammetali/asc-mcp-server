@@ -43,6 +43,7 @@ No more clicking through App Store Connect for 20 minutes just to submit a new v
 *   `asc_list_beta_groups` - List TestFlight beta groups
 *   `asc_add_build_to_beta_group` - Distribute build to a specific tester group
 *   `asc_set_testflight_whats_new` - Set TestFlight release notes
+*   `asc_get_testflight_feedback` - Pull tester screenshot + crash feedback (text, device, OS, tester, build) so an AI agent can triage it
 
 ### 🔍 Review & Submission
 *   `asc_get_review_submission` - Check review status, demo account, and rejection info
@@ -119,6 +120,11 @@ The AI will sequentially execute:
 
 ### 3. Quick TestFlight Push
 *"Distribute the newest build to the 'Internal Testers' group and set the notes to 'Added dark mode'."*
+
+### 4. Triage Beta Feedback
+*"What are TestFlight testers saying about the latest build? Summarize the crashes and complaints."*
+
+The AI will call `asc_get_testflight_feedback` and summarize the screenshot + crash submissions for you.
 
 ## 📄 License
 This project is licensed under the MIT License - see the LICENSE file for details.
