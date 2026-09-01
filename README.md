@@ -126,5 +126,20 @@ The AI will sequentially execute:
 
 The AI will call `asc_get_testflight_feedback` and summarize the screenshot + crash submissions for you.
 
+### 5. Auto-Generate Release Notes from Git
+*"Look at the commits since our last tag, write user-friendly release notes from them (no commit-speak), and push them as the What's New text."*
+
+The AI reads your local git history, drafts copy, then calls `asc_update_whats_new` (and can loop over each locale via `asc_update_version_localization`).
+
+### 6. ASO Keyword Refresh
+*"Pull our current App Store keywords, research what's trending for our category, and update the keyword field with a stronger 100-character set."*
+
+The AI calls `asc_get_version_localizations` to read the current keywords, then `asc_update_version_localization` to write the new ones back.
+
+### 7. Auto-Respond to Reviews
+*"Reply to this week's 1 and 2-star reviews with a genuinely helpful, empathetic response."*
+
+The AI calls `asc_list_customer_reviews`, drafts a reply per review, then posts each one with `asc_respond_to_review`.
+
 ## 📄 License
 This project is licensed under the MIT License - see the LICENSE file for details.
