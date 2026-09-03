@@ -1,5 +1,5 @@
 {
-  "name": "asc-mcp-server",
+  "name": "@muhammetali/asc-mcp-server",
   "version": "1.2.0",
   "description": "App Store Connect MCP Server for AI coding agents",
   "type": "module",

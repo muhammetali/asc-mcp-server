@@ -10,7 +10,7 @@
   "packages": [
     {
       "registryType": "npm",
-      "identifier": "asc-mcp-server",
+      "identifier": "@muhammetali/asc-mcp-server",
       "version": "1.2.0",
       "transport": {
         "type": "stdio"

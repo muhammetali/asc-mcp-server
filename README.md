@@ -1,6 +1,6 @@
 # 🍏 App Store Connect MCP Server
 
-[![npm version](https://img.shields.io/npm/v/asc-mcp-server.svg)](https://npmjs.org/package/asc-mcp-server)
+[![npm version](https://img.shields.io/npm/v/%40muhammetali%2Fasc-mcp-server.svg)](https://npmjs.org/package/@muhammetali/asc-mcp-server)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-blue.svg)](https://modelcontextprotocol.io/)
 
