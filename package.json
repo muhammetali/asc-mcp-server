@@ -4,6 +4,38 @@
   "description": "App Store Connect MCP Server for AI coding agents",
   "type": "module",
   "main": "dist/index.js",
+  "bin": {
+    "asc-mcp-server": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "!dist/__tests__",
+    "README.md",
+    "LICENSE"
+  ],
+  "mcpName": "io.github.muhammetali/asc-mcp-server",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "appstore",
+    "app-store-connect",
+    "apple",
+    "ios",
+    "testflight",
+    "builds",
+    "reviews",
+    "claude"
+  ],
+  "author": "muhammetali",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/muhammetali/asc-mcp-server.git"
+  },
+  "homepage": "https://github.com/muhammetali/asc-mcp-server#readme",
+  "bugs": {
+    "url": "https://github.com/muhammetali/asc-mcp-server/issues"
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/index.ts",

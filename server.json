@@ -1,0 +1,43 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.muhammetali/asc-mcp-server",
+  "description": "App Store Connect MCP Server for AI coding agents",
+  "repository": {
+    "url": "https://github.com/muhammetali/asc-mcp-server",
+    "source": "github"
+  },
+  "version": "1.0.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "asc-mcp-server",
+      "version": "1.0.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "description": "App Store Connect API Key ID",
+          "isRequired": true,
+          "format": "string",
+          "isSecret": false,
+          "name": "APP_STORE_CONNECT_KEY_ID"
+        },
+        {
+          "description": "App Store Connect Issuer ID",
+          "isRequired": true,
+          "format": "string",
+          "isSecret": false,
+          "name": "APP_STORE_CONNECT_ISSUER_ID"
+        },
+        {
+          "description": "Absolute path to the App Store Connect .p8 private key file",
+          "isRequired": true,
+          "format": "string",
+          "isSecret": true,
+          "name": "APP_STORE_CONNECT_P8_PATH"
+        }
+      ]
+    }
+  ]
+}
