@@ -1,0 +1,23 @@
+# Smithery configuration file: https://smithery.ai/docs/config#smitheryyaml
+
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    required:
+      - appStoreConnectKeyId
+      - appStoreConnectIssuerId
+      - appStoreConnectP8Path
+    properties:
+      appStoreConnectKeyId:
+        type: string
+        description: App Store Connect API Key ID
+      appStoreConnectIssuerId:
+        type: string
+        description: App Store Connect Issuer ID
+      appStoreConnectP8Path:
+        type: string
+        description: Absolute path to the App Store Connect .p8 private key file
+  commandFunction:
+    |-
+    (config) => ({ command: 'node', args: ['dist/index.js'], env: { APP_STORE_CONNECT_KEY_ID: config.appStoreConnectKeyId, APP_STORE_CONNECT_ISSUER_ID: config.appStoreConnectIssuerId, APP_STORE_CONNECT_P8_PATH: config.appStoreConnectP8Path } })
