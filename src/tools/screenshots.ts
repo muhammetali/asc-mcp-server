@@ -135,6 +135,163 @@ export async function uploadScreenshot(
   return md;
 }
 
+export const SCREENSHOT_DISPLAY_TYPES = [
+  'APP_IPHONE_67', 'APP_IPHONE_61', 'APP_IPHONE_65', 'APP_IPHONE_58',
+  'APP_IPHONE_55', 'APP_IPHONE_47', 'APP_IPAD_PRO_3GEN_129',
+  'APP_IPAD_PRO_3GEN_11', 'APP_IPAD_PRO_129', 'APP_IPAD_105',
+] as const;
+
+export interface ScreenshotBatchEntry {
+  /** Version localization ID, from asc_get_version_localizations. */
+  versionLocalizationId: string;
+  /** Absolute paths, in the order the screenshots should appear. */
+  filePaths: string[];
+}
+
+/** Finds the set for this display type under a localization, creating it if absent. */
+async function resolveScreenshotSet(
+  versionLocalizationId: string,
+  displayType: string,
+): Promise<{ setId: string; created: boolean }> {
+  const existing = await ascGet<ASCResponse>(
+    `/v1/appStoreVersionLocalizations/${versionLocalizationId}/appScreenshotSets`,
+    { 'fields[appScreenshotSets]': 'screenshotDisplayType' },
+  );
+  for (const set of existing.data || []) {
+    if (set.attributes.screenshotDisplayType === displayType) {
+      return { setId: set.id, created: false };
+    }
+  }
+
+  const created = await ascPost<ASCResponse>('/v1/appScreenshotSets', {
+    data: {
+      type: 'appScreenshotSets',
+      attributes: { screenshotDisplayType: displayType },
+      relationships: {
+        appStoreVersionLocalization: {
+          data: { type: 'appStoreVersionLocalizations', id: versionLocalizationId },
+        },
+      },
+    },
+  });
+  return { setId: created.data.id, created: true };
+}
+
+/** Reserve → upload chunks → commit, without the per-file markdown narration. */
+async function uploadOne(setId: string, filePath: string, fileName: string): Promise<void> {
+  const fileData = readFileSync(filePath);
+  const checksum = createHash('md5').update(fileData).digest('hex');
+
+  const reserved = await ascPost<ASCResponse>('/v1/appScreenshots', {
+    data: {
+      type: 'appScreenshots',
+      attributes: { fileName, fileSize: fileData.length },
+      relationships: {
+        appScreenshotSet: { data: { type: 'appScreenshotSets', id: setId } },
+      },
+    },
+  });
+
+  const screenshotId = reserved.data.id;
+  for (const op of reserved.data.attributes.uploadOperations) {
+    const headers: Record<string, string> = {};
+    for (const h of op.requestHeaders) headers[h.name] = h.value;
+    await ascUploadChunk(op.url, fileData.subarray(op.offset, op.offset + op.length), headers);
+  }
+
+  await ascPatch(`/v1/appScreenshots/${screenshotId}`, {
+    data: {
+      type: 'appScreenshots',
+      id: screenshotId,
+      attributes: { uploaded: true, sourceFileChecksum: checksum },
+    },
+  });
+}
+
+/**
+ * Uploads whole screenshot sets across many localizations in one call.
+ *
+ * Why this exists: replacing a store's screenshots is inherently a bulk job —
+ * one set per locale, several images per set. Doing it with the single-file
+ * tools costs `locales × (1 lookup + 1 clear + N uploads)` round trips; a real
+ * 7-locale × 9-image refresh came to seventy calls, which is why it ended up
+ * being scripted outside the MCP server instead of driven through it.
+ *
+ * It also folds in the two steps that always accompany the upload: finding the
+ * display type's set (creating it when a locale has none yet) and clearing what
+ * is already there, so callers do not have to thread set IDs by hand.
+ *
+ * Every file is validated and read BEFORE anything is uploaded — a missing or
+ * non-image path halfway through would otherwise leave some locales replaced
+ * and others emptied.
+ */
+export async function uploadScreenshotsBatch(
+  displayType: string,
+  entries: ScreenshotBatchEntry[],
+  replace = true,
+): Promise<string> {
+  if (!SCREENSHOT_DISPLAY_TYPES.includes(displayType as any)) {
+    throw new Error(
+      `Invalid displayType: "${displayType}". Must be one of: ${SCREENSHOT_DISPLAY_TYPES.join(', ')}`,
+    );
+  }
+  if (entries.length === 0) {
+    throw new Error('entries is empty — nothing to upload.');
+  }
+
+  const prepared = entries.map(({ versionLocalizationId, filePaths }) => {
+    validateId(versionLocalizationId, 'versionLocalizationId');
+    if (filePaths.length === 0) {
+      throw new Error(`No filePaths given for localization ${versionLocalizationId}.`);
+    }
+    const files = filePaths.map((p) => {
+      const resolved = resolve(p);
+      if (!existsSync(resolved)) {
+        throw new Error(`File not found: ${resolved}`);
+      }
+      if (!resolved.match(/\.(png|jpg|jpeg)$/i)) {
+        throw new Error(`Invalid file type. Only PNG and JPEG screenshots are supported: ${resolved}`);
+      }
+      return { path: resolved, name: resolved.split('/').pop() as string };
+    });
+    return { versionLocalizationId, files };
+  });
+
+  const rows: string[] = [];
+  let uploaded = 0;
+
+  for (const { versionLocalizationId, files } of prepared) {
+    const { setId, created } = await resolveScreenshotSet(versionLocalizationId, displayType);
+
+    let cleared = 0;
+    if (replace) {
+      const current = await ascGet<ASCResponse>(
+        `/v1/appScreenshotSets/${setId}/appScreenshots`,
+        { 'fields[appScreenshots]': 'fileName' },
+      );
+      const existing = current.data || [];
+      await Promise.all(existing.map((ss: any) => ascDelete(`/v1/appScreenshots/${ss.id}`)));
+      cleared = existing.length;
+    }
+
+    for (const f of files) {
+      await uploadOne(setId, f.path, f.name);
+      uploaded++;
+    }
+
+    const note = created ? 'set created' : replace ? `${cleared} replaced` : 'appended';
+    rows.push(`| ${versionLocalizationId} | ${files.length} | ${note} |`);
+  }
+
+  let md = `## Screenshot Batch Upload\n\n`;
+  md += `**${uploaded}** screenshot(s) across **${prepared.length}** localization(s).\n\n`;
+  md += `| Localization | Uploaded | Set |\n`;
+  md += `|--------------|----------|-----|\n`;
+  md += rows.join('\n');
+  md += `\n\n**Display type:** ${displayType}`;
+  return md;
+}
+
 export async function deleteScreenshot(screenshotId: string): Promise<string> {
   validateId(screenshotId, 'screenshotId');
 

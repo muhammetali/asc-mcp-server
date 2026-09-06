@@ -44,3 +44,19 @@ npx vitest run src/__tests__/tools-review.test.ts   # Single test file
 ## Testing
 
 Tests in `src/__tests__/` use Vitest. They mock `global.fetch` and the auth module — no real API calls. Test files mirror tool modules (e.g., `tools-review.test.ts` tests `src/tools/review.ts`).
+
+## Screenshots: prefer the batch tool
+
+Replacing a store's screenshots is inherently a bulk job — one set per locale,
+several images per set. `asc_upload_screenshot` handles a single image into a
+known set, so driving a full refresh through it costs
+`locales x (1 lookup + 1 clear + N uploads)` round trips; a real 7-locale x
+9-image refresh came to seventy calls and ended up being scripted outside this
+server instead of driven through it.
+
+`asc_upload_screenshots_batch` is the entry point for anything multi-image or
+multi-locale. It also folds in the two steps that always accompany the upload:
+resolving the display type's set (creating it when a locale has none) and
+clearing what is already there. Every file is validated and read before the
+first upload, so a bad path in the last locale cannot leave earlier ones
+emptied.

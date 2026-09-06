@@ -39,7 +39,7 @@ import {
 } from './tools/review.js';
 import { getSalesReport, getFinancialReport } from './tools/reports.js';
 import {
-  listScreenshotSets, uploadScreenshot,
+  listScreenshotSets, uploadScreenshot, uploadScreenshotsBatch, SCREENSHOT_DISPLAY_TYPES,
   deleteScreenshot, deleteAllScreenshotsInSet,
 } from './tools/screenshots.js';
 import {
@@ -646,6 +646,42 @@ server.tool(
   async ({ screenshotSetId, filePath, fileName }) => {
     try {
       const result = await uploadScreenshot(screenshotSetId, filePath, fileName);
+      return { content: [{ type: 'text', text: result }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: handleError(e) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'asc_upload_screenshots_batch',
+  'Upload whole screenshot sets across many localizations in one call. Finds each localization\'s set for the display type (creating it when absent) and clears it first, so a store-wide screenshot refresh is one call instead of locales x (lookup + clear + N uploads). Use this for any multi-image or multi-locale upload; asc_upload_screenshot is for adding a single image to a known set.',
+  {
+    displayType: z
+      .enum(SCREENSHOT_DISPLAY_TYPES)
+      .describe('Device size the set belongs to (e.g. APP_IPHONE_67)'),
+    entries: z
+      .array(
+        z.object({
+          versionLocalizationId: z
+            .string()
+            .describe('Version localization ID (from asc_get_version_localizations)'),
+          filePaths: z
+            .array(z.string())
+            .min(1)
+            .describe('Absolute paths to PNG/JPEG files, in display order'),
+        }),
+      )
+      .min(1)
+      .describe('One entry per localization'),
+    replace: z
+      .boolean()
+      .optional()
+      .describe('Clear each set before uploading so the result is exactly the given list (default: true)'),
+  },
+  async ({ displayType, entries, replace }) => {
+    try {
+      const result = await uploadScreenshotsBatch(displayType, entries, replace ?? true);
       return { content: [{ type: 'text', text: result }] };
     } catch (e) {
       return { content: [{ type: 'text', text: handleError(e) }], isError: true };

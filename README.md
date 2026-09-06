@@ -58,6 +58,7 @@ No more clicking through App Store Connect for 20 minutes just to submit a new v
 ### 📸 Screenshots
 *   `asc_list_screenshot_sets` - View screenshot sets
 *   `asc_upload_screenshot` - 3-step upload automation (reserve, upload, commit)
+*   `asc_upload_screenshots_batch` - Whole sets across many localizations in **one call**; finds or creates each set and clears it first (a 7-locale x 9-image refresh is 1 call instead of ~70)
 *   `asc_delete_screenshot` - Delete a single screenshot
 *   `asc_delete_all_screenshots` - Clear an entire screenshot set
 
