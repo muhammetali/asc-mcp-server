@@ -60,3 +60,32 @@ resolving the display type's set (creating it when a locale has none) and
 clearing what is already there. Every file is validated and read before the
 first upload, so a bad path in the last locale cannot leave earlier ones
 emptied.
+
+## Releases
+
+Releases are automatic. `semantic-release` runs on every push to `main`,
+reads the commits since the last release, and decides from them whether to
+publish a patch, a minor, a major — or nothing. There is no version to bump:
+`package.json` reads `0.0.0-development`, and the real version is written at
+release time, because a number checked into the repository could only ever
+be a stale copy of the released one.
+
+This makes the commit message load-bearing:
+
+- `fix:` → patch
+- `feat:` → minor
+- `!` after the type, or a `BREAKING CHANGE:` footer → major
+- `docs:` `chore:` `ci:` `test:` `refactor:` → no release
+
+A message that does not parse does not fail loudly — it silently contributes
+nothing to the next release, and if every commit in a push is unparseable no
+release happens and nobody is told why. The `commit-messages` job checks this
+on pull requests so it surfaces there instead.
+
+`main` is protected: no direct pushes, and the checks must pass before a
+merge. Work goes through a branch and a pull request.
+
+Do not add a workflow that publishes on a `v*` tag. semantic-release creates
+those tags itself, so such a workflow publishes each version twice and the
+second attempt fails with "You cannot publish over the previously published
+versions".
